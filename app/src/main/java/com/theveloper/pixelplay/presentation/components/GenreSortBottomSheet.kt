@@ -43,7 +43,8 @@ fun GenreSortBottomSheet(
     onDismiss: () -> Unit,
     currentSort: SortOption,
     onSortSelected: (SortOption) -> Unit,
-    onShuffle: () -> Unit
+    onShuffle: () -> Unit,
+    headerContent: @Composable (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
@@ -98,6 +99,11 @@ fun GenreSortBottomSheet(
                         fontWeight = FontWeight.Bold
                     )
                 }
+            }
+            
+            if (headerContent != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                headerContent()
             }
             
             Spacer(modifier = Modifier.height(32.dp))

@@ -225,6 +225,7 @@ fun GenreDetailScreen(
     }
     
     val customGenres by playerViewModel.customGenres.collectAsState()
+    val customGenreIcons by playerViewModel.customGenreIcons.collectAsState()
     val isMiniPlayerVisible = stablePlayerState.currentSong != null
     val fabBottomPadding by animateDpAsState(
         targetValue = if (isMiniPlayerVisible) MiniPlayerHeight + 16.dp else 16.dp, 
@@ -425,18 +426,23 @@ fun GenreDetailScreen(
             }
 
             // Quick Fill Dialog
-            QuickFillDialog(
-                visible = showQuickFillDialog,
-                songs = uiState.songs,
-                customGenres = customGenres,
-                onDismiss = { showQuickFillDialog = false },
-                onApply = { songs, genre ->
-                    playerViewModel.batchEditGenre(songs, genre)
-                },
-                onAddCustomGenre = { genre ->
-                    playerViewModel.addCustomGenre(genre)
-                }
-            )
+            // QuickFillDialog with Base Theme (Independent of Genre Theme)
+            MaterialTheme(colorScheme = baseColorScheme) {
+                QuickFillDialog(
+                    visible = showQuickFillDialog,
+                    songs = uiState.songs,
+                    customGenres = customGenres,
+                    customGenreIcons = customGenreIcons,
+                    onDismiss = { showQuickFillDialog = false },
+                    onApply = { songs, genre ->
+                        playerViewModel.batchEditGenre(songs, genre)
+                        showQuickFillDialog = false
+                    },
+                    onAddCustomGenre = { genre, iconRes ->
+                        playerViewModel.addCustomGenre(genre, iconRes)
+                    }
+                )
+            }
         
             // Song Options Bottom Sheet
             showSongOptionsSheet?.let { song ->

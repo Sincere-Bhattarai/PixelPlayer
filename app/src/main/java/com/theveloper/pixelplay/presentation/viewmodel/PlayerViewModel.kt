@@ -2703,4 +2703,70 @@ class PlayerViewModel @Inject constructor(
             resetAndLoadInitialData("Blocked directories changed")
         }
     }
+    fun batchEditGenre(songs: List<Song>, newGenre: String) {
+        if (songs.isEmpty()) return
+
+        viewModelScope.launch {
+            Log.d("PlayerViewModel", "Starting batch genre update for ${songs.size} songs to '$newGenre'")
+            _toastEvents.emit("Updating ${songs.size} songs...")
+            
+            var successCount = 0
+            var failCount = 0
+            
+            songs.forEach { song ->
+                val result = metadataEditStateHolder.saveMetadata(
+                    song = song,
+                    newTitle = song.title,
+                    newArtist = song.artist,
+                    newAlbum = song.album,
+                    newGenre = newGenre,
+                    newLyrics = song.lyrics ?: "",
+                    newTrackNumber = song.trackNumber,
+                    coverArtUpdate = null
+                )
+                
+                if (result.success && result.updatedSong != null) {
+                    successCount++
+                    val updatedSong = result.updatedSong
+                    
+                    // Optimistic update of UI flows
+                    _masterAllSongs.update { list -> 
+                        list.map { if (it.id == song.id) updatedSong else it }.toImmutableList() 
+                    }
+                    libraryStateHolder.updateSong(updatedSong)
+                    
+                    if (playbackStateHolder.stablePlayerState.value.currentSong?.id == song.id) {
+                         playbackStateHolder.updateStablePlayerState { it.copy(currentSong = updatedSong) }
+                         val controller = playbackStateHolder.mediaController
+                         if (controller != null) {
+                              val idx = controller.currentMediaItemIndex
+                              if (idx != C.INDEX_UNSET) {
+                                  controller.replaceMediaItem(idx, MediaItemBuilder.build(updatedSong))
+                              }
+                         }
+                    }
+                } else {
+                    failCount++
+                }
+            }
+            
+            if (failCount == 0) {
+                _toastEvents.emit("Successfully updated $successCount songs!")
+            } else {
+                _toastEvents.emit("Updated $successCount songs. Failed: $failCount")
+            }
+        }
+    }
+
+    val customGenres = userPreferencesRepository.customGenresFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+        
+    val customGenreIcons = userPreferencesRepository.customGenreIconsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    fun addCustomGenre(genre: String, iconResId: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.addCustomGenre(genre, iconResId)
+        }
+    }
 }

@@ -290,11 +290,11 @@ fun SongPickerList(
                 }
             }
             
-            com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar(
+            ExpressiveScrollBar(
                 listState = listState,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .padding(bottom = contentPadding.calculateBottomPadding(), top = contentPadding.calculateTopPadding())
+                    .padding(bottom = contentPadding.calculateBottomPadding(), top = contentPadding.calculateTopPadding() + 10.dp)
             )
         }
     }

@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.screens.search.components
 
 import androidx.annotation.OptIn
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +61,10 @@ fun GenreCategoriesGrid(
     }
 
     val systemNavBarHeight = getNavigationBarHeight()
+    val customGenreIcons = playerViewModel.customGenreIcons.collectAsState(
+        initial = emptyMap(),
+        context = kotlin.coroutines.EmptyCoroutineContext
+    ).value
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -95,6 +100,7 @@ fun GenreCategoriesGrid(
             // CORREGIDO: Obtener las URIs de manera más robusta
             GenreCard(
                 genre = genre,
+                customIcons = customGenreIcons,
                 onClick = { onGenreClick(genre) }
             )
         }
@@ -104,6 +110,7 @@ fun GenreCategoriesGrid(
 @Composable
 private fun GenreCard(
     genre: Genre,
+    customIcons: Map<String, Int>,
     onClick: () -> Unit
 ) {
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -154,7 +161,7 @@ private fun GenreCard(
                     .offset(x = 16.dp, y = 16.dp) // Adjusted offset
             ) {
                 SmartImage(
-                    model = GenreIconProvider.getGenreImageResource(genre.id), // Use genre.id for image resource
+                    model = GenreIconProvider.getGenreImageResource(genre.name, customIcons), // Use genre.name for icon lookup
                     contentDescription = "Genre illustration",
                     modifier = Modifier
                         .fillMaxSize()
