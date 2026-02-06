@@ -194,7 +194,6 @@ import com.theveloper.pixelplay.data.model.PlaylistShapeType
 import kotlinx.coroutines.flow.first
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
-import androidx.paging.compose.itemKey
 import androidx.paging.LoadState
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
 import com.theveloper.pixelplay.presentation.components.LibrarySortBottomSheet
@@ -1719,11 +1718,6 @@ fun LibraryFoldersTab(
         val visibilityCallback by rememberUpdatedState(onLocateCurrentSongVisibilityChanged)
         val registerActionCallback by rememberUpdatedState(onRegisterLocateCurrentSongAction)
         
-        // Scroll to top when sort option changes
-        LaunchedEffect(currentSortOption) {
-            listState.scrollToItem(0)
-        }
-
         val flattenedFolders = remember(folders, currentSortOption) {
             sortMusicFoldersByOption(flattenFolders(folders), currentSortOption)
         }
@@ -1863,14 +1857,14 @@ fun LibraryFoldersTab(
                                     top = 0.dp                            )
                             ) {
                                 if (showPlaylistCards) {
-                                    items(itemsToShow, key = { "folder_${it.path}" }) { folder ->
+                                    items(itemsToShow) { folder ->
                                         FolderPlaylistItem(
                                             folder = folder,
                                             onClick = { onFolderAsPlaylistClick(folder) }
                                         )
                                     }
                                 } else {
-                                    items(itemsToShow, key = { "folder_${it.path}" }) { folder ->
+                                    items(itemsToShow) { folder ->
                                         FolderListItem(
                                             folder = folder,
                                             onClick = { onFolderClick(folder.path) }
@@ -1878,7 +1872,7 @@ fun LibraryFoldersTab(
                                     }
                                 }
 
-                                items(songsToShow, key = { "song_${it.id}" }) { song ->
+                                items(songsToShow) { song ->
                                     EnhancedSongListItem(
                                         song = song,
                                         isPlaying = stablePlayerState.currentSong?.id == song.id && stablePlayerState.isPlaying,
@@ -2102,13 +2096,6 @@ fun LibraryFavoritesTab(
         }
     }
 
-    // Scroll to top when the list changes due to sorting
-    LaunchedEffect(favoriteSongs) {
-        if (favoriteSongs.isNotEmpty()) {
-            listState.scrollToItem(0)
-        }
-    }
-
     // No need to collect favoriteSongs again if it's passed directly as a list
     // However, if you need to react to its changes, ensure it's collected or passed as StateFlow's value
 
@@ -2162,7 +2149,7 @@ fun LibraryFavoritesTab(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
                     ) {
-                        items(favoriteSongs, key = { "fav_${it.id}" }) { song ->
+                        items(favoriteSongs) { song ->
                             val isPlayingThisSong =
                                 song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
                             EnhancedSongListItem(
@@ -2363,7 +2350,7 @@ fun LibrarySongsTab(
                             contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
                         ) {
                             item(key = "songs_top_spacer") { Spacer(Modifier.height(0.dp)) }
-                            items(songs, key = { "song_${it.id}" }) { song ->
+                            items(songs) { song ->
                                 val isPlayingThisSong =
                                     song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
 
@@ -2552,7 +2539,6 @@ fun LibrarySongsTabPaginated(
                             
                             items(
                                 count = paginatedSongs.itemCount,
-                                key = paginatedSongs.itemKey { "song_${it.id}" },
                                 contentType = paginatedSongs.itemContentType { "song" }
                             ) { index ->
                                 val song = paginatedSongs[index]
@@ -2816,7 +2802,7 @@ fun LibraryAlbumsTab(
                             contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + ListExtraBottomGap + 4.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                             items(albums, key = { "album_${it.id}" }) { album ->
+                             items(albums) { album ->
                                 val albumSpecificColorSchemeFlow =
                                     playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
                                 val rememberedOnClick = remember(album.id) { { onAlbumClick(album.id) } }
@@ -2860,7 +2846,7 @@ fun LibraryAlbumsTab(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
     
-                            items(albums, key = { "album_${it.id}" }) { album ->
+                            items(albums) { album ->
                                 val albumSpecificColorSchemeFlow =
                                     playerViewModel.themeStateHolder.getAlbumColorSchemeFlow(album.albumArtUriString ?: "")
                                 val rememberedOnClick = remember(album.id) { { onAlbumClick(album.id) } }
@@ -3113,7 +3099,7 @@ fun LibraryArtistsTab(
 //                        item(key = "artists_top_spacer") {
 //                            Spacer(Modifier.height(4.dp))
 //                        }
-                        items(artists, key = { "artist_${it.id}" }) { artist ->
+                        items(artists) { artist ->
                             val rememberedOnClick = remember(artist) { { onArtistClick(artist.id) } }
                             ArtistListItem(artist = artist, onClick = rememberedOnClick)
                         }
