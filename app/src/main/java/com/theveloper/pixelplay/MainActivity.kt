@@ -70,7 +70,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
-import android.os.Trace // Import Trace
+
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -116,49 +116,16 @@ import com.theveloper.pixelplay.utils.LogUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
-import androidx.annotation.DrawableRes
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.Scaffold
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
-import com.theveloper.pixelplay.presentation.components.PlayerInternalNavigationBar
-import javax.annotation.concurrent.Immutable
-import com.theveloper.pixelplay.presentation.components.DismissUndoBar
-import com.theveloper.pixelplay.presentation.components.NavBarContentHeightFullWidth
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.ui.unit.lerp
-import com.theveloper.pixelplay.data.preferences.AppThemeMode
-import com.theveloper.pixelplay.data.preferences.NavBarStyle
-import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
-import com.theveloper.pixelplay.data.worker.SyncProgress
-import com.theveloper.pixelplay.presentation.components.MiniPlayerBottomSpacer
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
-import com.theveloper.pixelplay.presentation.components.AppSidebarDrawer
-import com.theveloper.pixelplay.presentation.components.DrawerDestination
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.rememberDrawerState
 import com.theveloper.pixelplay.presentation.utils.AppHapticsConfig
 import com.theveloper.pixelplay.presentation.utils.LocalAppHapticsConfig
 import com.theveloper.pixelplay.presentation.utils.NoOpHapticFeedback
 import com.theveloper.pixelplay.utils.CrashLogData
-import kotlinx.coroutines.launch
-import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import javax.annotation.concurrent.Immutable
-import javax.inject.Inject
-import com.theveloper.pixelplay.utils.CrashLogData
+
 
 @Immutable
 data class BottomNavItem(
@@ -618,20 +585,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
         ) {
-            AppSidebarDrawer(
-                drawerState = drawerState,
-                selectedRoute = currentRoute ?: Screen.Home.route,
-                onDestinationSelected = { destination ->
-                    scope.launch { drawerState.close() }
-                    when (destination) {
-                        DrawerDestination.Home -> navController.navigate(Screen.Home.route) {
-                            popUpTo(Screen.Home.route) { inclusive = true }
-                        }
-                        DrawerDestination.Equalizer -> navController.navigate(Screen.Equalizer.route)
-                        DrawerDestination.Settings -> navController.navigate(Screen.Settings.route)
-                    }
-                }
-            ) {
+
                 Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = {
@@ -815,6 +769,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
         Trace.endSection()
     }
 

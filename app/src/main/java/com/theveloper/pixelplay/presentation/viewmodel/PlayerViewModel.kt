@@ -147,7 +147,9 @@ class PlayerViewModel @Inject constructor(
     private val metadataEditStateHolder: MetadataEditStateHolder,
     private val externalMediaStateHolder: ExternalMediaStateHolder,
     val themeStateHolder: ThemeStateHolder,
-    val multiSelectionStateHolder: MultiSelectionStateHolder
+    val multiSelectionStateHolder: MultiSelectionStateHolder,
+    private val sessionToken: SessionToken,
+    private val mediaControllerFactory: com.theveloper.pixelplay.data.media.MediaControllerFactory
 ) : ViewModel() {
 
     private val _playerUiState = MutableStateFlow(PlayerUiState())
@@ -546,7 +548,7 @@ class PlayerViewModel @Inject constructor(
 
 
     private var mediaController: MediaController? = null
-    private val sessionToken = SessionToken(context, ComponentName(context, MusicService::class.java))
+    // SessionToken injected via constructor
     private val mediaControllerListener = object : MediaController.Listener, Player.Listener {
         override fun onCustomCommand(
             controller: MediaController,
@@ -590,9 +592,7 @@ class PlayerViewModel @Inject constructor(
         }
     }
     private val mediaControllerFuture: ListenableFuture<MediaController> =
-        MediaController.Builder(context, sessionToken)
-            .setListener(mediaControllerListener)
-            .buildAsync()
+        mediaControllerFactory.create(context, sessionToken, mediaControllerListener)
     private var pendingRepeatMode: Int? = null
 
     private var pendingPlaybackAction: (() -> Unit)? = null
@@ -645,6 +645,8 @@ class PlayerViewModel @Inject constructor(
             songs.find { it.id == songId }?.copy(isFavorite = favorites.contains(songId))
         }.distinctUntilChanged()
     }
+
+
 
     private fun updateDailyMix() {
         // Delegate to DailyMixStateHolder
@@ -1964,7 +1966,7 @@ class PlayerViewModel @Inject constructor(
             putBoolean(MusicNotificationProvider.EXTRA_SHUFFLE_ENABLED, enabled)
         }
         controller.sendCustomCommand(
-            SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_SET_SHUFFLE_STATE, Bundle.EMPTY),
+            SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_SET_SHUFFLE_STATE, Bundle()),
             args
         )
     }
@@ -2829,7 +2831,7 @@ class PlayerViewModel @Inject constructor(
 
     fun getSongUrisForGenre(genreId: String): Flow<List<String>> {
         return musicRepository.getMusicByGenre(genreId).map { songs ->
-            songs.take(4).mapNotNull { it.albumArtUriString }
+            songs.take(4).mapNotNull { it.albumArtUriString?.takeIf { uri -> uri.isNotBlank() } }
         }
     }
 

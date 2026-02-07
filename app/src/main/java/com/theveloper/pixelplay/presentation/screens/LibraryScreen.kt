@@ -1165,7 +1165,12 @@ fun LibraryScreen(
         onDismiss = { showCreatePlaylistDialog = false },
         onGenerateClick = {
             showCreatePlaylistDialog = false
-            showAiSheet = true
+            if (hasGeminiApiKey) {
+                playerViewModel.clearAiPlaylistError()
+                showCreateAiPlaylistDialog = true
+            } else {
+                Toast.makeText(context, "Set your Gemini API key first", Toast.LENGTH_SHORT).show()
+            }
         },
         onCreate = { name, imageUri, color, icon, songIds, cropScale, cropPanX, cropPanY, shapeType, d1, d2, d3, d4 ->
             playlistViewModel.createPlaylist(

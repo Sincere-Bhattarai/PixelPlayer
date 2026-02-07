@@ -56,6 +56,15 @@ object AppModule {
         return app as PixelPlayApplication
     }
 
+    @Singleton
+    @Provides
+    fun provideSessionToken(@ApplicationContext context: Context): androidx.media3.session.SessionToken {
+        return androidx.media3.session.SessionToken(
+            context,
+            android.content.ComponentName(context, com.theveloper.pixelplay.data.service.MusicService::class.java)
+        )
+    }
+
     @Provides
     @Singleton
     fun providePreferencesDataStore(
