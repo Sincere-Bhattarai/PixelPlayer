@@ -6,6 +6,7 @@ import android.media.MediaMetadataRetriever
 import android.util.Log
 import com.theveloper.pixelplay.data.database.MusicDao
 import java.io.File
+import java.util.Locale
 
 data class AudioMeta(
     val mimeType: String?,
@@ -75,15 +76,80 @@ object AudioMetaUtils {
     }
 
     fun mimeTypeToFormat(mimeType: String?): String {
-        return when (mimeType?.lowercase()) {
-            "audio/mpeg" -> "mp3"
-            "audio/flac" -> "flac"
-            "audio/x-wav", "audio/wav" -> "wav"
-            "audio/ogg" -> "ogg"
-            "audio/opus" -> "opus"
-            "audio/mp4", "audio/m4a" -> "m4a"
-            "audio/aac" -> "aac"
-            "audio/amr" -> "amr"
+        val normalized = mimeType
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            ?.substringBefore(';')
+            ?: return "-"
+
+        if (normalized.isBlank()) return "-"
+
+        return when {
+            normalized == "audio/mpeg" ||
+                normalized == "audio/mp3" ||
+                normalized == "audio/x-mp3" ||
+                normalized == "audio/mpeg3" -> "mp3"
+
+            normalized == "audio/flac" ||
+                normalized == "audio/x-flac" -> "flac"
+
+            normalized == "audio/wav" ||
+                normalized == "audio/x-wav" ||
+                normalized == "audio/wave" ||
+                normalized == "audio/vnd.wave" -> "wav"
+
+            normalized == "audio/ogg" ||
+                normalized == "application/ogg" ||
+                normalized == "audio/vorbis" ||
+                normalized == "audio/x-vorbis" -> "ogg"
+
+            normalized == "audio/opus" ||
+                normalized == "audio/x-opus" -> "opus"
+
+            normalized == "audio/mp4" ||
+                normalized == "audio/m4a" ||
+                normalized == "audio/x-m4a" ||
+                normalized == "audio/mp4a-latm" -> "m4a"
+
+            normalized == "audio/aac" ||
+                normalized == "audio/aacp" -> "aac"
+
+            normalized == "audio/amr" ||
+                normalized == "audio/amr-wb" ||
+                normalized == "audio/3gpp" -> "amr"
+
+            normalized == "audio/alac" ||
+                normalized == "audio/x-alac" -> "alac"
+
+            normalized == "audio/aiff" ||
+                normalized == "audio/x-aiff" ||
+                normalized == "audio/aif" ||
+                normalized == "audio/x-aifc" -> "aiff"
+
+            normalized == "audio/x-ms-wma" ||
+                normalized == "audio/wma" -> "wma"
+
+            normalized == "audio/ac3" ||
+                normalized == "audio/eac3" ||
+                normalized == "audio/eac3-joc" -> "ac3"
+
+            normalized == "audio/vnd.dts" ||
+                normalized == "audio/vnd.dts.hd" -> "dts"
+
+            normalized.contains("mp4a") -> "m4a"
+            normalized.contains("flac") -> "flac"
+            normalized.contains("opus") -> "opus"
+            normalized.contains("vorbis") || normalized.contains("ogg") -> "ogg"
+            normalized.contains("wav") || normalized.contains("wave") -> "wav"
+            normalized.contains("aac") -> "aac"
+            normalized.contains("mpeg") || normalized.contains("mp3") -> "mp3"
+            normalized.contains("amr") -> "amr"
+            normalized.contains("alac") -> "alac"
+            normalized.contains("aiff") || normalized.contains("aif") -> "aiff"
+            normalized.contains("wma") -> "wma"
+            normalized.contains("dts") -> "dts"
+            normalized.contains("eac3") || normalized.contains("ac3") -> "ac3"
+            normalized.startsWith("audio/") -> normalized.substringAfter("audio/").ifBlank { "-" }
             else -> "-"
         }
     }

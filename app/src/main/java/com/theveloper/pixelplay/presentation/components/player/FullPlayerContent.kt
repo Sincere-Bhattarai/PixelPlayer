@@ -14,6 +14,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -115,6 +116,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import timber.log.Timber
+import java.util.Locale
 import kotlin.math.roundToLong
 import com.theveloper.pixelplay.presentation.components.WavySliderExpressive
 import com.theveloper.pixelplay.presentation.components.ToggleSegmentButton
@@ -177,6 +179,7 @@ fun FullPlayerContent(
     val currentSongArtists by playerViewModel.currentSongArtists.collectAsState()
     val lyricsSyncOffset by playerViewModel.currentSongLyricsSyncOffset.collectAsState()
     val albumArtQuality by playerViewModel.albumArtQuality.collectAsState()
+    val playbackAudioMetadata by playerViewModel.playbackAudioMetadata.collectAsState()
     val immersiveLyricsEnabled by playerViewModel.immersiveLyricsEnabled.collectAsState()
     val immersiveLyricsTimeout by playerViewModel.immersiveLyricsTimeout.collectAsState()
     val isImmersiveTemporarilyDisabled by playerViewModel.isImmersiveTemporarilyDisabled.collectAsState()
@@ -304,6 +307,14 @@ fun FullPlayerContent(
     @Composable
     fun AlbumCoverSection(modifier: Modifier = Modifier) {
         val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delayAlbumCarousel
+        val albumArtScale by animateFloatAsState(
+            targetValue = if (isPlayingProvider()) 1f else 0.95f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessLow
+            ),
+            label = "AlbumArtScale"
+        )
 
         BoxWithConstraints(
             modifier = modifier
@@ -346,7 +357,12 @@ fun FullPlayerContent(
                         }
                     },
                     carouselStyle = carouselStyle,
-                    modifier = Modifier.height(carouselHeight),
+                    modifier = Modifier
+                        .height(carouselHeight)
+                        .graphicsLayer {
+                            scaleX = albumArtScale
+                            scaleY = albumArtScale
+                        },
                     albumArtQuality = albumArtQuality
                 )
             }
@@ -416,10 +432,15 @@ fun FullPlayerContent(
 
     @Composable
     fun PlayerProgressSection() {
+        val isMetadataForCurrentSong = playbackAudioMetadata.mediaId == song.id
         PlayerProgressBarSection(
+            songId = song.id,
             currentPositionProvider = currentPositionProvider,
             totalDurationValue = totalDurationValue,
             songDurationHintMs = song.duration,
+            audioMimeType = if (isMetadataForCurrentSong) playbackAudioMetadata.mimeType else null,
+            audioBitrate = if (isMetadataForCurrentSong) playbackAudioMetadata.bitrate else null,
+            audioSampleRate = if (isMetadataForCurrentSong) playbackAudioMetadata.sampleRate else null,
             onSeek = onSeek,
             expansionFractionProvider = expansionFractionProvider,
             isPlayingProvider = isPlayingProvider,
@@ -499,11 +520,15 @@ fun FullPlayerContent(
 
             AlbumCoverSection()
 
-            Box(Modifier.align(Alignment.Start)) {
-                SongMetadataSection()
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(Modifier.align(Alignment.Start)) {
+                    SongMetadataSection()
+                }
+                PlayerProgressSection()
             }
-
-            PlayerProgressSection()
 
             ControlsSection()
         }
@@ -1022,18 +1047,34 @@ private fun SongMetadataDisplaySection(
     }
 }
 
-fun formatAudioMetaString(mimeType: String?, bitrate: Int?, sampleRate: Int?): String {
-    val bitrate = bitrate?.div(1000) ?: 0       // convert to kb/s
-    val sampleRate = sampleRate ?: 0           // in Hz
+private fun formatAudioMetaLabel(mimeType: String?, bitrate: Int?, sampleRate: Int?): String? {
+    val formatLabel = mimeTypeToFormat(mimeType)
+        .takeIf { it != "-" }
+        ?.uppercase(Locale.getDefault())
 
-    return "${mimeTypeToFormat(mimeType)} \u25CF $bitrate kb/s \u25CF ${sampleRate / 1000.0} kHz"
+    val parts = buildList {
+        sampleRate?.takeIf { it > 0 }?.let { add(String.format(Locale.US, "%.1f kHz", it / 1000.0)) }
+        bitrate?.takeIf { it > 0 }?.let { bitrateValue ->
+            val kbpsLabel = "${bitrateValue / 1000} kbps"
+            if (formatLabel != null) {
+                add("$kbpsLabel \u2022 $formatLabel")
+            } else {
+                add(kbpsLabel)
+            }
+        } ?: formatLabel?.let { add(it) }
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" \u2022 ")
 }
 
 @Composable
 private fun PlayerProgressBarSection(
+    songId: String,
     currentPositionProvider: () -> Long,
     totalDurationValue: Long,
     songDurationHintMs: Long,
+    audioMimeType: String?,
+    audioBitrate: Int?,
+    audioSampleRate: Int?,
     onSeek: (Long) -> Unit,
     expansionFractionProvider: () -> Float,
     isPlayingProvider: () -> Boolean,
@@ -1057,6 +1098,22 @@ private fun PlayerProgressBarSection(
         hintDuration <= 0L -> reportedDuration
         kotlin.math.abs(reportedDuration - hintDuration) <= 1500L -> reportedDuration
         else -> minOf(reportedDuration, hintDuration)
+    }
+    val audioMetaLabel = remember(audioMimeType, audioBitrate, audioSampleRate) {
+        formatAudioMetaLabel(
+            mimeType = audioMimeType,
+            bitrate = audioBitrate,
+            sampleRate = audioSampleRate
+        )
+    }
+    var displayAudioMetaLabel by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(songId, audioMetaLabel) {
+        if (!audioMetaLabel.isNullOrBlank()) {
+            displayAudioMetaLabel = audioMetaLabel
+        } else {
+            kotlinx.coroutines.delay(500)
+            displayAudioMetaLabel = null
+        }
     }
     val durationForCalc = displayDurationValue.coerceAtLeast(1L)
     
@@ -1184,7 +1241,8 @@ private fun PlayerProgressBarSection(
                 positionState = effectivePositionState,
                 duration = displayDurationValue,
                 isVisible = isVisible,
-                textColor = timeTextColor
+                textColor = timeTextColor,
+                audioMetaLabel = displayAudioMetaLabel
             )
         }
     }
@@ -1220,7 +1278,8 @@ private fun EfficientTimeLabels(
     positionState: androidx.compose.runtime.State<Long>,
     duration: Long,
     isVisible: Boolean,
-    textColor: Color
+    textColor: Color,
+    audioMetaLabel: String?
 ) {
     // Move state derivation inside the component but remember it based on inputs
     // Actually, we can just use derivedStateOf here.
@@ -1231,30 +1290,49 @@ private fun EfficientTimeLabels(
         derivedStateOf { if (isVisible) formatDuration(duration) else "--:--" } 
     }
 
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 4.dp)
     ) {
-        // Reads happen here, but now we read the derived String state.
-        // If the String doesn't change, Text *might* skip recomposition if it's smart,
-        // but the Row body will still execute?
-        // No, if we read `posStr` (delegated property), we read the State<String>. 
-        // If the State<String> didn't change (because derivedStateOf result equality check), 
-        // this scope won't recompose!
-        
-        Text(
-            posStr,
-            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-            color = textColor
-        )
-        Text(
-            durStr,
-            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-            color = textColor
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                posStr,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = textColor
+            )
+            Text(
+                durStr,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = textColor
+            )
+        }
+
+        if (!audioMetaLabel.isNullOrBlank()) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 58.dp),
+                shape = RoundedCornerShape(999.dp),
+                color = textColor.copy(alpha = 0.14f),
+                contentColor = textColor.copy(alpha = 0.96f)
+            ) {
+                Text(
+                    text = audioMetaLabel,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 11.sp
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+            }
+        }
     }
 }
 
@@ -1354,7 +1432,7 @@ private fun PlayerSongInfo(
     Column(
         horizontalAlignment = Alignment.Start,
             modifier = modifier
-                .padding(vertical = 10.dp)
+                .padding(vertical = 4.dp)
                 .fillMaxWidth()
             .graphicsLayer {
                 val fraction = expansionFractionProvider()
@@ -1375,7 +1453,7 @@ private fun PlayerSongInfo(
             expansionFractionProvider,
             modifier = Modifier.fillMaxWidth()
         )
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
         AutoScrollingTextOnDemand(
             text = artist,
