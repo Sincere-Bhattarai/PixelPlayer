@@ -8,7 +8,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.Until
-import androidx.test.uiautomator.UiDevice
 import android.util.Log
 import org.junit.Rule
 import org.junit.Test
@@ -24,13 +23,13 @@ class BaselineProfileGenerator {
 
     @Test
     fun generate() {
-        val packageName = "com.theveloper.pixelplay"
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val packageName = InstrumentationRegistry.getArguments().getString("targetAppId")
+            ?: "com.theveloper.pixelplay"
 
         rule.collect(
             packageName = packageName,
             includeInStartupProfile = true,
-            maxIterations = 1
+            maxIterations = 2
         ) {
             try {
                 // 1. SETUP & STARTUP
@@ -39,7 +38,9 @@ class BaselineProfileGenerator {
 
                 Log.d("BaselineProfileGenerator", "--- INICIANDO PIXELPLAY ---")
 
-                device.executeShellCommand("am start -n $packageName/.MainActivity")
+                device.executeShellCommand("am force-stop $packageName")
+                Thread.sleep(800)
+                device.executeShellCommand("am start -W -n $packageName/.MainActivity --ez is_benchmark true")
                 device.wait(Until.hasObject(By.pkg(packageName)), 15000)
                 Thread.sleep(6000) // Tiempo extra para carga inicial
 
@@ -192,6 +193,14 @@ class BaselineProfileGenerator {
                     }
                     Thread.sleep(3500) // Espera a expansión completa
 
+                    // 2. Playback Controls & Wavy Slider Targeting
+                    val playPausePattern = Pattern.compile(".*(Play|Pause|Reproducir|Pausar).*", Pattern.CASE_INSENSITIVE)
+                    val nextPattern = Pattern.compile(".*(Next|Siguiente).*", Pattern.CASE_INSENSITIVE)
+                    val prevPattern = Pattern.compile(".*(Previous|Anterior).*", Pattern.CASE_INSENSITIVE)
+                    val playerOpened = device.hasObject(By.desc(playPausePattern))
+                        || device.hasObject(By.desc(nextPattern))
+                        || device.hasObject(By.desc(prevPattern))
+
                     // 1. Carousel Swipe
                     val carouselY = (device.displayHeight * 0.45).toInt()
                     val leftX = (device.displayWidth * 0.2).toInt()
@@ -202,11 +211,6 @@ class BaselineProfileGenerator {
                         device.swipe(leftX, carouselY, rightX, carouselY, 30)
                         Thread.sleep(800)
                     }
-
-                    // 2. Playback Controls & Wavy Slider Targeting
-                    val playPausePattern = Pattern.compile(".*(Play|Pause|Reproducir|Pausar).*", Pattern.CASE_INSENSITIVE)
-                    val nextPattern = Pattern.compile(".*(Next|Siguiente).*", Pattern.CASE_INSENSITIVE)
-                    val prevPattern = Pattern.compile(".*(Previous|Anterior).*", Pattern.CASE_INSENSITIVE)
 
                     // Find controls to anchor slider swipe
                     var playButton = device.wait(Until.findObject(By.desc(playPausePattern)), 2000)
@@ -258,8 +262,10 @@ class BaselineProfileGenerator {
                         Thread.sleep(1500)
                     }
 
-                    device.pressBack() // Colapsar Player
-                    Thread.sleep(1000)
+                    if (playerOpened) {
+                        device.pressBack() // Colapsar Player
+                        Thread.sleep(1000)
+                    }
                 }
 
                 Log.d("BaselineProfileGenerator", "--- FLUJO FINALIZADO ---")
@@ -268,8 +274,6 @@ class BaselineProfileGenerator {
             } catch (e: Exception) {
                 Log.e("BaselineProfileGenerator", "Error fatal: ${e.toString()}")
                 e.printStackTrace()
-            } finally {
-                recoverBaselineProfile(packageName, instrumentation)
             }
         }
     }
@@ -370,27 +374,5 @@ class BaselineProfileGenerator {
             Thread.sleep(1500)
             blindScroll()
         }
-    }
-
-    private fun recoverBaselineProfile(packageName: String, instrumentation: android.app.Instrumentation) {
-        val deviceManual = UiDevice.getInstance(instrumentation)
-
-        // El Logcat confirmó que la ruta es:
-        val srcPath = "/data/misc/profman/$packageName-primary.prof.txt"
-
-        // Destino en la carpeta de medios del benchmark (Donde SIEMPRE hay permisos de escritura/lectura)
-        val dest = "/sdcard/Android/media/com.theveloper.pixelplay.baselineprofile/baseline-prof.txt"
-
-        Log.i("BaselineProfileGenerator", "Forzando volcado de perfiles...")
-
-        deviceManual.executeShellCommand("pm dump-profiles --dump-classes-and-methods $packageName")
-        deviceManual.executeShellCommand("killall -s SIGUSR1 $packageName")
-        Thread.sleep(5000)
-
-        // Intentamos una copia estándar a una ruta que ADB puede leer sin Root
-        deviceManual.executeShellCommand("sh -c 'cat $srcPath > $dest'")
-
-        Log.i("BaselineProfileGenerator", "RESCATE FINALIZADO.")
-        Log.i("BaselineProfileGenerator", "SI FALLA EL PULL MANUAL, USA EL COMANDO ROOT DESDE TU MAC.")
     }
 }

@@ -31,9 +31,12 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
 
     override fun onCreate() {
         super.onCreate()
-        
-        // Install crash handler to catch and save uncaught exceptions
-        CrashHandler.install(this)
+
+        // Benchmark variant intentionally restarts/kills app process during tests.
+        // Avoid persisting those events as user-facing crash reports.
+        if (BuildConfig.BUILD_TYPE != "benchmark") {
+            CrashHandler.install(this)
+        }
 
 //        if (BuildConfig.DEBUG) {
 //            Timber.plant(Timber.DebugTree())

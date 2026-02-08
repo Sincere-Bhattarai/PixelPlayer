@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity() {
 
             // Check for crash log when app starts
             LaunchedEffect(Unit) {
-                if (CrashHandler.hasCrashLog()) {
+                if (!isBenchmarkMode && CrashHandler.hasCrashLog()) {
                     crashLogData = CrashHandler.getCrashLog()
                     showCrashReportDialog = true
                 }
