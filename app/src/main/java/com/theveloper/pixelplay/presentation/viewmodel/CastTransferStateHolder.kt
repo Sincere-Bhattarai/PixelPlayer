@@ -527,7 +527,7 @@ class CastTransferStateHolder @Inject constructor(
                 Timber.tag(CAST_LOG_TAG).w("Cast player unavailable during transferPlayback.")
                 castStateHolder.setRemotePlaybackActive(false)
                 castStateHolder.setCastConnecting(false)
-                sessionManager.endCurrentSession(true)
+                sessionManager?.endCurrentSession(true)
                 return@launch
             }
 
@@ -565,7 +565,7 @@ class CastTransferStateHolder @Inject constructor(
                             )
                             castStateHolder.setRemotePlaybackActive(false)
                             castStateHolder.setCastConnecting(false)
-                            sessionManager.endCurrentSession(true)
+                            sessionManager?.endCurrentSession(true)
                             return@loadResult
                         }
 

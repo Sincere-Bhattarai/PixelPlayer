@@ -346,6 +346,12 @@ class LibraryStateHolder @Inject constructor(
             currentList.map { if (it.id == updatedSong.id) updatedSong else it }.toImmutableList()
         }
     }
+
+    fun removeSong(songId: String) {
+        _allSongs.update { currentList ->
+            currentList.filter { it.id != songId }.toImmutableList()
+        }
+    }
 }
 
 private fun androidx.compose.ui.graphics.Color.toHexString(): String {

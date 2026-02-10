@@ -117,73 +117,57 @@ class MusicRepositoryImpl @Inject constructor(
         musicDao.getRandomSongs(limit).map { it.toSong() }
     }
 
+    /**
+     * Compute allowed parent directories by subtracting blocked dirs from all known dirs.
+     * Returns Pair(allowedDirs, applyFilter) for use with Room DAO filtered queries.
+     */
+    private suspend fun computeAllowedDirs(blockedDirs: Set<String>): Pair<List<String>, Boolean> {
+        if (blockedDirs.isEmpty()) return Pair(emptyList(), false)
+        val resolver = DirectoryRuleResolver(
+            emptySet(),
+            blockedDirs.map(::normalizePath).toSet()
+        )
+        val allDirs = musicDao.getDistinctParentDirectories()
+        val allowed = allDirs.filter { !resolver.isBlocked(normalizePath(it)) }
+        return Pair(allowed, true)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun getAlbums(): Flow<List<Album>> {
-        return getAudioFiles().map { songs ->
-            songs.groupBy { it.albumId }
-                .map { (albumId, songs) ->
-                    val first = songs.first()
-                    Album(
-                        id = albumId,
-                        title = first.album,
-                        artist = first.artist, // Or albumArtist if available
-                        albumArtUriString = first.albumArtUriString,
-                        songCount = songs.size,
-                        year = first.year
-                    )
-                }
-                .sortedBy { it.title.lowercase() }
-        }.flowOn(Dispatchers.Default)
+        return userPreferencesRepository.blockedDirectoriesFlow
+            .flatMapLatest { blockedDirs ->
+                val (allowedDirs, applyFilter) = computeAllowedDirs(blockedDirs)
+                musicDao.getAlbums(allowedDirs, applyFilter)
+                    .map { entities -> entities.map { it.toAlbum() } }
+            }.flowOn(Dispatchers.IO)
     }
 
     override fun getAlbumById(id: Long): Flow<Album?> {
-        return getAlbums().map { albums -> 
-            albums.find { it.id == id }
-        }
+        return musicDao.getAlbumById(id).map { it?.toAlbum() }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun getArtists(): Flow<List<Artist>> {
-        // Combine MediaStore songs (for filtering/grouping) with DB Artists (for Image URLs)
-        return combine(
-            getAudioFiles(),
-            musicDao.getAllArtistsRaw()
-        ) { songs, dbArtists ->
-            val dbArtistsByNormalizedName = dbArtists.associateBy { it.name.trim().lowercase() }
-            
-            val artists = songs.groupBy { it.artistId }
-                .map { (artistId, songs) ->
-                    val first = songs.first()
-                    val normalizedArtistName = first.artist.trim().lowercase()
-                    // Read image from DB using artist name to avoid ID mismatches across data sources.
-                    val imageUrl = dbArtistsByNormalizedName[normalizedArtistName]?.imageUrl
-                    
-                    Artist(
-                        id = artistId,
-                        name = first.artist,
-                        songCount = songs.size,
-                        imageUrl = imageUrl
-                    )
-                }
-                .sortedBy { it.name.lowercase() }
-            
-            // Trigger prefetch for missing images
-            // We use a separate list to avoid passing the entire heavy payload to the IO dispatcher if not needed
-            val missingImages = artists.asSequence()
-                .filter { it.imageUrl.isNullOrEmpty() && it.name.isNotBlank() }
-                .map { artist ->
-                    val normalizedArtistName = artist.name.trim().lowercase()
-                    val cacheArtistId = dbArtistsByNormalizedName[normalizedArtistName]?.id ?: artist.id
-                    cacheArtistId to artist.name
-                }
-                .distinctBy { (_, artistName) -> artistName.trim().lowercase() }
-                .toList()
-            if (missingImages.isNotEmpty()) {
-                // Ensure this doesn't block the UI flow emission
-               kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                    artistImageRepository.prefetchArtistImages(missingImages)
-               }
-            }
-            artists
-        }.flowOn(Dispatchers.Default)
+        return userPreferencesRepository.blockedDirectoriesFlow
+            .flatMapLatest { blockedDirs ->
+                val (allowedDirs, applyFilter) = computeAllowedDirs(blockedDirs)
+                musicDao.getArtistsWithSongCountsFiltered(allowedDirs, applyFilter)
+                    .map { entities ->
+                        val artists = entities.map { it.toArtist() }
+                        // Trigger prefetch for missing images
+                        val missingImages = artists.asSequence()
+                            .filter { it.imageUrl.isNullOrEmpty() && it.name.isNotBlank() }
+                            .map { it.id to it.name }
+                            .distinctBy { (_, name) -> name.trim().lowercase() }
+                            .toList()
+                        if (missingImages.isNotEmpty()) {
+                            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                                artistImageRepository.prefetchArtistImages(missingImages)
+                            }
+                        }
+                        artists
+                    }
+            }.flowOn(Dispatchers.IO)
     }
 
     override fun getSongsForAlbum(albumId: Long): Flow<List<Song>> {
@@ -194,9 +178,7 @@ class MusicRepositoryImpl @Inject constructor(
     }
 
     override fun getArtistById(artistId: Long): Flow<Artist?> {
-         return getArtists().map { artists ->
-             artists.find { it.id == artistId }
-         }
+        return musicDao.getArtistById(artistId).map { it?.toArtist() }
     }
 
     override fun getArtistsForSong(songId: Long): Flow<List<Artist>> {

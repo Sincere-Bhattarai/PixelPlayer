@@ -160,7 +160,8 @@ class PlayerViewModel @Inject constructor(
     val stablePlayerState: StateFlow<StablePlayerState> = playbackStateHolder.stablePlayerState
     val playbackHistory = listeningStatsTracker.playbackHistory
     
-    private val _masterAllSongs = MutableStateFlow<ImmutableList<Song>>(persistentListOf())
+    // Removed: _masterAllSongs was a duplicate of libraryStateHolder.allSongs
+    // All reads now delegate to libraryStateHolder.allSongs
 
     // Lyrics load callback for LyricsStateHolder
     private val lyricsLoadCallback = object : LyricsLoadCallback {
@@ -574,7 +575,7 @@ class PlayerViewModel @Inject constructor(
 
     val favoriteSongs: StateFlow<ImmutableList<Song>> = combine(
         favoriteSongIds,
-        _masterAllSongs,
+        libraryStateHolder.allSongs,
         libraryStateHolder.currentFavoriteSortOption
     ) { ids: Set<String>, allSongsList: List<Song>, sortOption: SortOption ->
         val favoriteSongsList = allSongsList.filter { song -> ids.contains(song.id) }
@@ -633,14 +634,14 @@ class PlayerViewModel @Inject constructor(
         }
         
         // Otherwise start a new shuffled queue
-        val allSongs = _masterAllSongs.value
+        val allSongs = libraryStateHolder.allSongs.value
         if (allSongs.isNotEmpty()) {
             playSongsShuffled(allSongs, "All Songs (Shuffled)")
         }
     }
 
     fun playRandomSong() {
-        val allSongs = _masterAllSongs.value
+        val allSongs = libraryStateHolder.allSongs.value
         if (allSongs.isNotEmpty()) {
             playSongsShuffled(allSongs, "All Songs (Shuffled)")
         }
@@ -671,7 +672,7 @@ class PlayerViewModel @Inject constructor(
         val allAlbums = _playerUiState.value.albums
         if (allAlbums.isNotEmpty()) {
             val randomAlbum = allAlbums.random()
-            val albumSongs = _masterAllSongs.value.filter { it.albumId == randomAlbum.id }
+            val albumSongs = libraryStateHolder.allSongs.value.filter { it.albumId == randomAlbum.id }
             if (albumSongs.isNotEmpty()) {
                 playSongsShuffled(albumSongs, randomAlbum.title)
             }
@@ -682,7 +683,7 @@ class PlayerViewModel @Inject constructor(
         val allArtists = _playerUiState.value.artists
         if (allArtists.isNotEmpty()) {
             val randomArtist = allArtists.random()
-            val artistSongs = _masterAllSongs.value.filter { it.artistId == randomArtist.id }
+            val artistSongs = libraryStateHolder.allSongs.value.filter { it.artistId == randomArtist.id }
             if (artistSongs.isNotEmpty()) {
                 playSongsShuffled(artistSongs, randomArtist.name)
             }
@@ -929,7 +930,7 @@ class PlayerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            if (!isSyncingStateFlow.value && !_isInitialDataLoaded.value && _masterAllSongs.value.isEmpty()) {
+            if (!isSyncingStateFlow.value && !_isInitialDataLoaded.value && libraryStateHolder.allSongs.value.isEmpty()) {
                 Log.i("PlayerViewModel", "Initial check: Sync not active and initial data not loaded. Calling resetAndLoadInitialData.")
                 resetAndLoadInitialData("Initial Check")
             }
@@ -983,7 +984,7 @@ class PlayerViewModel @Inject constructor(
             toastEmitter = { msg -> _toastEvents.emit(msg) },
             mediaControllerProvider = { mediaController },
             currentSongIdProvider = { stablePlayerState.map { it.currentSong?.id }.stateIn(viewModelScope, SharingStarted.Eagerly, null) },
-            songTitleResolver = { songId -> _masterAllSongs.value.find { it.id == songId }?.title ?: "Unknown" }
+            songTitleResolver = { songId -> libraryStateHolder.allSongs.value.find { it.id == songId }?.title ?: "Unknown" }
         )
 
         // Initialize SearchStateHolder
@@ -1009,7 +1010,7 @@ class PlayerViewModel @Inject constructor(
         // Initialize AiStateHolder
         aiStateHolder.initialize(
             scope = viewModelScope,
-            allSongsProvider = { _masterAllSongs.value },
+            allSongsProvider = { libraryStateHolder.allSongs.value },
             favoriteSongIdsProvider = { favoriteSongIds.value },
             toastEmitter = { msg -> viewModelScope.launch { _toastEvents.emit(msg) } },
             playSongsCallback = { songs, startSong, queueName -> playSongs(songs, startSong, queueName) },
@@ -1051,8 +1052,6 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             libraryStateHolder.allSongs.collect { songs ->
                 _playerUiState.update { it.copy(allSongs = songs, songCount = songs.size) }
-                // Update master songs for Cast usage if needed
-                _masterAllSongs.value = songs
             }
         }
         viewModelScope.launch {
@@ -1118,7 +1117,7 @@ class PlayerViewModel @Inject constructor(
                     it.copy(currentPlaybackQueue = newQueue.toImmutableList()) 
                 }
             },
-            getMasterAllSongs = { _masterAllSongs.value },
+            getMasterAllSongs = { libraryStateHolder.allSongs.value },
             onTransferBackComplete = { startProgressUpdates() },
             onSheetVisible = { _isSheetVisible.value = true },
             onDisconnect = { disconnect() },
@@ -1186,7 +1185,7 @@ class PlayerViewModel @Inject constructor(
             _isInitialThemePreloadComplete.value = false
             if (isSyncingStateFlow.value && !_isInitialDataLoaded.value) {
                 // Sync is active - defer to sync completion handler
-            } else if (!_isInitialDataLoaded.value && _masterAllSongs.value.isEmpty()) {
+            } else if (!_isInitialDataLoaded.value && libraryStateHolder.allSongs.value.isEmpty()) {
                 resetAndLoadInitialData("preloadThemesAndInitialData")
             }
             _isInitialThemePreloadComplete.value = true
@@ -1303,7 +1302,7 @@ class PlayerViewModel @Inject constructor(
 
     fun showAndPlaySong(song: Song) {
         Log.d("ShuffleDebug", "showAndPlaySong (single song overload) called for '${song.title}'")
-        val allSongs = _masterAllSongs.value.toList()
+        val allSongs = libraryStateHolder.allSongs.value.toList()
         // Look up the current version of the song in allSongs to get the most up-to-date metadata
         val currentSong = allSongs.find { it.id == song.id } ?: song
         showAndPlaySong(currentSong, allSongs, "Library")
@@ -1449,7 +1448,7 @@ class PlayerViewModel @Inject constructor(
 
     private fun resolveSongFromMediaItem(mediaItem: MediaItem): Song? {
         _playerUiState.value.currentPlaybackQueue.find { it.id == mediaItem.mediaId }?.let { return it }
-        _masterAllSongs.value.find { it.id == mediaItem.mediaId }?.let { return it }
+        libraryStateHolder.allSongs.value.find { it.id == mediaItem.mediaId }?.let { return it }
 
         return mediaMapper.resolveSongFromMediaItem(mediaItem)
     }
@@ -1721,7 +1720,7 @@ class PlayerViewModel @Inject constructor(
                             playerCtrl.seekTo(0L)
                             playerCtrl.pause()
 
-                            val finishedSongTitle = _masterAllSongs.value.find { it.id == previousSongId }?.title
+                            val finishedSongTitle = libraryStateHolder.allSongs.value.find { it.id == previousSongId }?.title
                                 ?: "Track"
 
                             viewModelScope.launch {
@@ -2489,7 +2488,7 @@ class PlayerViewModel @Inject constructor(
                 currentQueueSourceName = ""
             )
         }
-        _masterAllSongs.value = _masterAllSongs.value.filter { it.id != song.id }.toImmutableList()
+        libraryStateHolder.removeSong(song.id)
         _isSheetVisible.value = false
         musicRepository.deleteById(song.id.toLong())
         userPreferencesRepository.removeSongFromAllPlaylists(song.id)
@@ -2625,8 +2624,8 @@ class PlayerViewModel @Inject constructor(
                             currentSong != null -> {
                                 loadAndPlaySong(currentSong)
                             }
-                            _masterAllSongs.value.isNotEmpty() -> {
-                                loadAndPlaySong(_masterAllSongs.value.first())
+                            libraryStateHolder.allSongs.value.isNotEmpty() -> {
+                                loadAndPlaySong(libraryStateHolder.allSongs.value.first())
                             }
                             else -> {
                                 controller.play()
@@ -3207,12 +3206,7 @@ class PlayerViewModel @Inject constructor(
                     }
                 }
 
-                // Update the song in the master songs flow
-                _masterAllSongs.update { songs ->
-                    songs.map { existing ->
-                        if (existing.id == song.id) updatedSong else existing
-                    }.toImmutableList()
-                }
+                // libraryStateHolder.updateSong() below handles the SSOT update
                 
                 // Update the LibraryStateHolder which drives the UI
                 libraryStateHolder.updateSong(updatedSong)
@@ -3417,9 +3411,7 @@ class PlayerViewModel @Inject constructor(
                     val updatedSong = result.updatedSong
                     
                     // Optimistic update of UI flows
-                    _masterAllSongs.update { list -> 
-                        list.map { if (it.id == song.id) updatedSong else it }.toImmutableList() 
-                    }
+                    // libraryStateHolder.updateSong() below handles the SSOT update
                     libraryStateHolder.updateSong(updatedSong)
                     
                     if (playbackStateHolder.stablePlayerState.value.currentSong?.id == song.id) {

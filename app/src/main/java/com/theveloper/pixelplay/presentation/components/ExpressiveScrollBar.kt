@@ -47,6 +47,7 @@ fun ExpressiveScrollBar(
     var isPressed by remember { mutableStateOf(false) }
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(-1f) }
+    var pendingScrollIndex by remember { mutableIntStateOf(-1) }
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val surfaceVariantColor = MaterialTheme.colorScheme.secondaryContainer
@@ -126,12 +127,18 @@ fun ExpressiveScrollBar(
             val newProgress = (targetHandleTop / scrollableHeight).coerceIn(0f, 1f)
             
             dragProgress = newProgress
-            val targetIndex = (newProgress * totalItemsCount).toInt()
-            
-            coroutineScope.launch {
-                listState?.scrollToItem(targetIndex)
-                gridState?.scrollToItem(targetIndex)
-            }
+            pendingScrollIndex = (newProgress * totalItemsCount).toInt()
+        }
+
+        // Throttled scroll: coalesces rapid drag updates into one scroll per frame
+        LaunchedEffect(Unit) {
+            snapshotFlow { pendingScrollIndex }
+                .collect { index ->
+                    if (index >= 0) {
+                        listState?.scrollToItem(index)
+                        gridState?.scrollToItem(index)
+                    }
+                }
         }
 
         Box(

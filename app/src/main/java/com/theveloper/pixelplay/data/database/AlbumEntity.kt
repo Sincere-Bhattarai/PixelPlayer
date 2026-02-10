@@ -26,11 +26,19 @@ data class AlbumEntity(
 )
 
 fun AlbumEntity.toAlbum(): Album {
+    // If stored art URI is null/blank, fall back to the standard content URI
+    // that MediaStore reliably resolves (same as MediaStoreSongRepository uses)
+    val effectiveAlbumArtUri = this.albumArtUriString?.takeIf { it.isNotBlank() }
+        ?: android.content.ContentUris.withAppendedId(
+            android.net.Uri.parse("content://media/external/audio/albumart"),
+            this.id
+        ).toString()
+
     return Album(
         id = this.id,
         title = this.title.normalizeMetadataTextOrEmpty(),
         artist = this.artistName.normalizeMetadataTextOrEmpty(),
-        albumArtUriString = this.albumArtUriString, // El modelo Album usa albumArtUrl
+        albumArtUriString = effectiveAlbumArtUri,
         songCount = this.songCount,
         year = this.year
     )

@@ -150,6 +150,10 @@ interface MusicDao {
         deleteOrphanedArtists()
     }
 
+    // --- Directory Helper ---
+    @Query("SELECT DISTINCT parent_directory_path FROM songs")
+    suspend fun getDistinctParentDirectories(): List<String>
+
     // --- Song Queries ---
     // Updated getSongs to potentially filter by parent_directory_path
     @Query("""

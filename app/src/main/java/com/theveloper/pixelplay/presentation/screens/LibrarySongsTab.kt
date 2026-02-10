@@ -233,6 +233,7 @@ fun LibrarySongsTab(
 
                             items(
                                 items = songs,
+                                key = { it.id },
                                 contentType = { "song" }
                             ) { song ->
                                 val isPlayingThisSong = song.id == stablePlayerState.currentSong?.id && stablePlayerState.isPlaying
