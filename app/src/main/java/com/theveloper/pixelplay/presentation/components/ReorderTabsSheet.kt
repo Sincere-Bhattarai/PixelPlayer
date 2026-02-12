@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,10 +46,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import android.view.HapticFeedbackConstants
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.presentation.library.LibraryTabId
+import com.theveloper.pixelplay.presentation.utils.LocalAppHapticsConfig
+import com.theveloper.pixelplay.presentation.utils.performAppCompatHapticFeedback
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -95,11 +102,20 @@ fun ReorderTabsSheet(
     var localTabs by remember { mutableStateOf(tabs) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val view = LocalView.current
+    val appHapticsConfig = LocalAppHapticsConfig.current
+
     val reorderableState = rememberReorderableLazyListState(
         onMove = { from, to ->
             localTabs = localTabs.toMutableList().apply {
                 add(to.index, removeAt(from.index))
             }
+            // Haptic feedback on reorder
+            performAppCompatHapticFeedback(
+                view,
+                appHapticsConfig,
+                HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+            )
         },
         lazyListState = listState
     )
@@ -161,6 +177,16 @@ fun ReorderTabsSheet(
                     ) {
                         items(localTabs, key = { it }) { tab ->
                             ReorderableItem(reorderableState, key = tab) { isDragging ->
+                                LaunchedEffect(isDragging) {
+                                    if (isDragging) {
+                                        performAppCompatHapticFeedback(
+                                            view,
+                                            appHapticsConfig,
+                                            HapticFeedbackConstants.GESTURE_START
+                                        )
+                                    }
+                                }
+
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()

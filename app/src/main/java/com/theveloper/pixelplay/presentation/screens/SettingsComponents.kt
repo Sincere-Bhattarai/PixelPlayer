@@ -62,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +72,9 @@ import com.theveloper.pixelplay.data.worker.SyncProgress
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsRefreshProgress
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import androidx.compose.ui.res.vectorResource
+import androidx.core.view.HapticFeedbackConstantsCompat
+import com.theveloper.pixelplay.presentation.utils.LocalAppHapticsConfig
+import com.theveloper.pixelplay.presentation.utils.performAppCompatHapticFeedback
 
 @Composable
 fun SettingsSection(title: String, icon: @Composable () -> Unit, content: @Composable () -> Unit) {
@@ -147,6 +151,9 @@ fun SwitchSettingItem(
         leadingIcon: @Composable (() -> Unit)? = null,
         enabled: Boolean = true
 ) {
+    val view = LocalView.current
+    val appHapticsConfig = LocalAppHapticsConfig.current
+
     Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
@@ -184,9 +191,19 @@ fun SwitchSettingItem(
             }
 
             Switch(
-                    checked = checked,
-                    onCheckedChange = { if (enabled) onCheckedChange(it) },
-                    enabled = enabled,
+                checked = checked,
+                onCheckedChange = { newValue ->
+                    if (enabled) {
+                        // Haptic feedback on toggle
+                        performAppCompatHapticFeedback(
+                            view,
+                            appHapticsConfig,
+                            HapticFeedbackConstantsCompat.GESTURE_START
+                        )
+                        onCheckedChange(newValue)
+                    }
+                },
+                enabled = enabled,
                     colors =
                             SwitchDefaults.colors(
                                     checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
