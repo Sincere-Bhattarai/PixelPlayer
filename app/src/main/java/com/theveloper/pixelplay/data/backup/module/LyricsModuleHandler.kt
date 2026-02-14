@@ -30,7 +30,7 @@ class LyricsModuleHandler @Inject constructor(
     override suspend fun snapshot(): String = export()
 
     override suspend fun restore(payload: String) = withContext(Dispatchers.IO) {
-        val type = object : TypeToken<List<LyricsEntity>>() {}.type
+        val type = TypeToken.getParameterized(List::class.java, LyricsEntity::class.java).type
         val lyrics: List<LyricsEntity> = gson.fromJson(payload, type)
         lyricsDao.deleteAll()
         if (lyrics.isNotEmpty()) {

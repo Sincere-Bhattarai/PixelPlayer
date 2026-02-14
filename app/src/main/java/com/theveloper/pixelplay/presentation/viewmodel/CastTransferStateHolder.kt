@@ -32,8 +32,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import timber.log.Timber
+import java.net.HttpURLConnection
+import java.net.Inet4Address
+import java.net.InetAddress
+import java.net.URL
 import kotlin.math.abs
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -63,6 +69,8 @@ class CastTransferStateHolder @Inject constructor(
     private var onSheetVisible: (() -> Unit)? = null
     // Callback to handle disconnection/errors
     private var onDisconnect: (() -> Unit)? = null
+    // Callback to surface cast errors to UI
+    private var onCastError: ((String) -> Unit)? = null
     // Callback to update color scheme
     private var onSongChanged: ((String?) -> Unit)? = null
 
@@ -110,6 +118,7 @@ class CastTransferStateHolder @Inject constructor(
     private var remoteStatusRefreshJob: Job? = null
     private var sessionSuspendedRecoveryJob: Job? = null
     private var alignToTargetJob: Job? = null
+    private val httpServerStartMutex = Mutex()
 
     fun initialize(
         scope: CoroutineScope,
@@ -119,6 +128,7 @@ class CastTransferStateHolder @Inject constructor(
         onTransferBackComplete: () -> Unit,
         onSheetVisible: () -> Unit,
         onDisconnect: () -> Unit,
+        onCastError: (String) -> Unit,
         onSongChanged: (String?) -> Unit
     ) {
         this.scope = scope
@@ -128,6 +138,7 @@ class CastTransferStateHolder @Inject constructor(
         this.onTransferBackComplete = onTransferBackComplete
         this.onSheetVisible = onSheetVisible
         this.onDisconnect = onDisconnect
+        this.onCastError = onCastError
         this.onSongChanged = onSongChanged
 
         setupListeners()
@@ -199,6 +210,7 @@ class CastTransferStateHolder @Inject constructor(
                 sessionSuspendedRecoveryJob?.cancel()
                 castStateHolder.setPendingCastRouteId(null)
                 castStateHolder.setCastConnecting(false)
+                emitCastError("Couldn't connect to Cast device (error $error).")
             }
             override fun onSessionEnding(session: CastSession) { }
             override fun onSessionResuming(session: CastSession, sessionId: String) {
@@ -208,6 +220,7 @@ class CastTransferStateHolder @Inject constructor(
                 sessionSuspendedRecoveryJob?.cancel()
                 castStateHolder.setPendingCastRouteId(null)
                 castStateHolder.setCastConnecting(false)
+                emitCastError("Cast session resume failed (error $error).")
             }
         }
         
@@ -478,8 +491,9 @@ class CastTransferStateHolder @Inject constructor(
             castStateHolder.setPendingCastRouteId(null)
             castStateHolder.setCastConnecting(true)
             castStateHolder.setRemotelySeeking(false)
-            
-            if (!ensureHttpServerRunning()) {
+
+            val castDeviceIpHint = resolveCastDeviceIp(session)
+            if (!ensureHttpServerRunning(castDeviceIpHint)) {
                 castStateHolder.setCastConnecting(false)
                 onDisconnect?.invoke()
                 return@launch
@@ -495,11 +509,13 @@ class CastTransferStateHolder @Inject constructor(
             
             if (serverAddress == null || currentQueue.isEmpty()) {
                 castStateHolder.setCastConnecting(false)
+                emitCastError("Cast setup is incomplete. Try reconnecting.")
                 return@launch
             }
 
             val wasPlaying = localPlayer.isPlaying
             val currentSongIndex = localPlayer.currentMediaItemIndex
+            val safeStartIndex = currentSongIndex.takeIf { it in currentQueue.indices } ?: 0
             val currentPosition = localPlayer.currentPosition
             
              val castRepeatMode = if (localPlayer.shuffleModeEnabled) {
@@ -528,8 +544,17 @@ class CastTransferStateHolder @Inject constructor(
                 Timber.tag(CAST_LOG_TAG).w("Cast player unavailable during transferPlayback.")
                 castStateHolder.setRemotePlaybackActive(false)
                 castStateHolder.setCastConnecting(false)
+                emitCastError("Cast player is unavailable. Try reconnecting.")
                 sessionManager?.endCurrentSession(true)
                 return@launch
+            }
+
+            val preflightSong = currentQueue.getOrNull(safeStartIndex)
+            if (preflightSong != null && !waitForSongEndpointReady(serverAddress, preflightSong)) {
+                Timber.tag(CAST_LOG_TAG).w(
+                    "Song endpoint preflight failed for songId=%s; continuing with queueLoad to avoid false negatives.",
+                    preflightSong.id
+                )
             }
 
             var initialLoadAttempt = 0
@@ -537,16 +562,17 @@ class CastTransferStateHolder @Inject constructor(
                 initialLoadAttempt += 1
                 castPlayer.loadQueue(
                     songs = currentQueue,
-                    startIndex = currentSongIndex,
+                    startIndex = safeStartIndex,
                     startPosition = currentPosition,
                     repeatMode = castRepeatMode,
                     serverAddress = serverAddress,
                     autoPlay = wasPlaying, // Simplification
-                    onComplete = loadResult@{ success ->
+                    onComplete = loadResult@{ success, detail ->
                         if (!success && initialLoadAttempt < 2) {
                             Timber.tag(CAST_LOG_TAG).w(
-                                "Initial Cast queue load failed (attempt %d). Retrying once.",
-                                initialLoadAttempt
+                                "Initial Cast queue load failed (attempt %d, detail=%s). Retrying once.",
+                                initialLoadAttempt,
+                                detail
                             )
                             session.remoteMediaClient?.requestStatus()
                             scope?.launch {
@@ -562,21 +588,30 @@ class CastTransferStateHolder @Inject constructor(
 
                         if (!success) {
                             Timber.tag(CAST_LOG_TAG).w(
-                                "Initial Cast queue load failed after retry; ending session to avoid stuck route."
+                                "Initial Cast queue load failed after retry; ending session to avoid stuck route. detail=%s",
+                                detail
                             )
                             castStateHolder.setRemotePlaybackActive(false)
                             castStateHolder.setCastConnecting(false)
+                            val detailedMessage = detail?.takeIf { it.isNotBlank() }
+                            emitCastError(
+                                if (detailedMessage != null) {
+                                    "Failed to load media on Cast device: $detailedMessage"
+                                } else {
+                                    "Failed to load media on Cast device."
+                                }
+                            )
                             sessionManager?.endCurrentSession(true)
                             return@loadResult
                         }
 
                         lastRemoteQueue = currentQueue
-                        lastRemoteSongId = currentQueue.getOrNull(currentSongIndex)?.id
+                        lastRemoteSongId = currentQueue.getOrNull(safeStartIndex)?.id
                         lastRemoteStreamPosition = currentPosition
                         lastRemoteRepeatMode = castRepeatMode
                         playbackStateHolder.startProgressUpdates()
                         session.remoteMediaClient?.requestStatus()
-                        currentQueue.getOrNull(currentSongIndex)?.id?.let(::launchAlignToTarget)
+                        currentQueue.getOrNull(safeStartIndex)?.id?.let(::launchAlignToTarget)
 
                         castStateHolder.setRemotePlaybackActive(true)
                         castStateHolder.setCastConnecting(false)
@@ -623,6 +658,122 @@ class CastTransferStateHolder @Inject constructor(
                 delay(refreshDelayMs)
             }
         }
+    }
+
+    private fun emitCastError(message: String) {
+        runCatching { onCastError?.invoke(message) }
+            .onFailure { throwable ->
+                Timber.tag(CAST_LOG_TAG).w(throwable, "Failed to emit cast error message")
+            }
+    }
+
+    private fun resolveCastDeviceIp(session: CastSession?): String? {
+        val castDevice = session?.castDevice ?: return null
+        val direct = normalizeHostAddress(runCatching { castDevice.ipAddress }.getOrNull())
+        if (direct != null) return direct
+        return normalizeHostAddress(runCatching { castDevice.inetAddress }.getOrNull())
+    }
+
+    private fun normalizeHostAddress(rawValue: Any?): String? {
+        val normalized: String? = when (rawValue) {
+            null -> null
+            is String -> rawValue
+            is InetAddress -> rawValue.hostAddress
+            else -> rawValue.toString()
+        }
+        val trimmed = normalized?.trim()
+        return trimmed?.takeIf { value -> value.isNotEmpty() }
+    }
+
+    private fun isServerAddressCompatibleWithCastDevice(
+        serverAddress: String?,
+        castDeviceIpHint: String?
+    ): Boolean {
+        if (serverAddress.isNullOrBlank()) return false
+        val castAddress = parseIpv4Address(castDeviceIpHint) ?: return true
+        val serverHost = Uri.parse(serverAddress).host
+        val serverHostAddress = parseIpv4Address(serverHost) ?: return true
+        val prefixLength = MediaFileHttpServerService.serverPrefixLength
+            .takeIf { it in 0..32 }
+            ?: 24
+        return isSameSubnet(serverHostAddress, castAddress, prefixLength)
+    }
+
+    private fun parseIpv4Address(rawAddress: String?): Inet4Address? {
+        val normalized = rawAddress?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val parsed = runCatching { InetAddress.getByName(normalized) }.getOrNull() ?: return null
+        return parsed as? Inet4Address
+    }
+
+    private fun isSameSubnet(localAddress: Inet4Address, remoteAddress: Inet4Address, prefixLength: Int): Boolean {
+        val clampedPrefix = prefixLength.coerceIn(0, 32)
+        if (clampedPrefix == 0) return true
+        val localInt = localAddress.toIntAddress()
+        val remoteInt = remoteAddress.toIntAddress()
+        val mask = if (clampedPrefix == 32) {
+            -1
+        } else {
+            (-1 shl (32 - clampedPrefix))
+        }
+        return (localInt and mask) == (remoteInt and mask)
+    }
+
+    private fun Inet4Address.toIntAddress(): Int {
+        val bytes = address
+        return ((bytes[0].toInt() and 0xFF) shl 24) or
+            ((bytes[1].toInt() and 0xFF) shl 16) or
+            ((bytes[2].toInt() and 0xFF) shl 8) or
+            (bytes[3].toInt() and 0xFF)
+    }
+
+    private suspend fun waitForSongEndpointReady(
+        serverAddress: String,
+        song: Song,
+        attempts: Int = 12,
+        delayMs: Long = 250L
+    ): Boolean {
+        repeat(attempts) { attempt ->
+            if (isSongEndpointReady(serverAddress, song)) {
+                return true
+            }
+            if (attempt < attempts - 1) {
+                delay(delayMs)
+            }
+        }
+        return false
+    }
+
+    private suspend fun isSongEndpointReady(serverAddress: String, song: Song): Boolean {
+        val songId = Uri.encode(song.id)
+        val localEndpoint = buildLoopbackEndpoint(serverAddress, "/song/$songId") ?: return false
+        return isHttpEndpointReady(localEndpoint, method = "HEAD")
+    }
+
+    private suspend fun isHttpEndpointReady(
+        endpoint: String,
+        method: String = "GET"
+    ): Boolean = withContext(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
+        runCatching {
+            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 150
+                readTimeout = 150
+                instanceFollowRedirects = false
+                requestMethod = method
+            }
+            val code = connection?.responseCode ?: -1
+            code in 200..299
+        }.getOrDefault(false).also {
+            connection?.disconnect()
+        }
+    }
+
+    private fun buildLoopbackEndpoint(serverAddress: String, path: String): String? {
+        val uri = Uri.parse(serverAddress)
+        val port = uri.port
+        if (port <= 0) return null
+        val normalizedPath = if (path.startsWith("/")) path else "/$path"
+        return "http://127.0.0.1:$port$normalizedPath"
     }
 
     /**
@@ -772,11 +923,62 @@ class CastTransferStateHolder @Inject constructor(
         onTransferBackComplete?.invoke()
     }
 
-    suspend fun ensureHttpServerRunning(): Boolean {
-        if (MediaFileHttpServerService.isServerRunning) return true
-        
+    fun primeHttpServerStart() {
+        if (MediaFileHttpServerService.isServerRunning || MediaFileHttpServerService.isServerStarting) return
+
+        MediaFileHttpServerService.lastFailureReason = null
+        MediaFileHttpServerService.lastFailureMessage = null
+
+        val castDeviceIpHint = resolveCastDeviceIp(
+            session = castStateHolder.castSession.value ?: sessionManager?.currentCastSession
+        )
+
         val intent = Intent(context, MediaFileHttpServerService::class.java).apply {
             action = MediaFileHttpServerService.ACTION_START_SERVER
+            castDeviceIpHint?.let { putExtra(MediaFileHttpServerService.EXTRA_CAST_DEVICE_IP, it) }
+        }
+        runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }.onFailure { throwable ->
+            Timber.tag(CAST_LOG_TAG).e(throwable, "Failed to pre-start media server service")
+            emitCastError(
+                "Couldn't pre-start Cast service: ${throwable.javaClass.simpleName}: ${throwable.message ?: "Unknown"}"
+            )
+        }
+    }
+
+    suspend fun ensureHttpServerRunning(castDeviceIpHint: String? = null): Boolean = httpServerStartMutex.withLock {
+        val runningServerAddress = MediaFileHttpServerService.serverAddress
+        if (MediaFileHttpServerService.isServerRunning && runningServerAddress != null) {
+            if (isServerAddressCompatibleWithCastDevice(runningServerAddress, castDeviceIpHint)) {
+                return@withLock true
+            }
+            Timber.tag(CAST_LOG_TAG).w(
+                "HTTP server host (%s) is not in Cast subnet (castDeviceIp=%s, prefix=%d). Restarting service.",
+                runningServerAddress,
+                castDeviceIpHint,
+                MediaFileHttpServerService.serverPrefixLength
+            )
+            context.stopService(Intent(context, MediaFileHttpServerService::class.java))
+            for (attempt in 0 until 30) {
+                if (!MediaFileHttpServerService.isServerRunning && !MediaFileHttpServerService.isServerStarting) {
+                    break
+                }
+                delay(100)
+            }
+        }
+
+        // Clear stale failure state from a previous attempt before starting a new one.
+        MediaFileHttpServerService.lastFailureReason = null
+        MediaFileHttpServerService.lastFailureMessage = null
+
+        val intent = Intent(context, MediaFileHttpServerService::class.java).apply {
+            action = MediaFileHttpServerService.ACTION_START_SERVER
+            castDeviceIpHint?.let { putExtra(MediaFileHttpServerService.EXTRA_CAST_DEVICE_IP, it) }
         }
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -786,24 +988,52 @@ class CastTransferStateHolder @Inject constructor(
             }
         } catch (e: Exception) {
             Timber.tag(CAST_LOG_TAG).e(e, "Failed to start media server service")
-            return false
+            emitCastError("Couldn't start Cast service: ${e.javaClass.simpleName}: ${e.message ?: "Unknown"}")
+            return@withLock false
         }
 
-        for (i in 0..20) {
+        // Release builds can take noticeably longer on cold start to bring up the HTTP service.
+        for (i in 0..200) {
             if (MediaFileHttpServerService.isServerRunning && MediaFileHttpServerService.serverAddress != null) {
-                return true
+                return@withLock true
             }
-            if (MediaFileHttpServerService.lastFailureReason != null) {
+            val failureReason = MediaFileHttpServerService.lastFailureReason
+            if (failureReason != null) {
+                val detail = MediaFileHttpServerService.lastFailureMessage
                 Timber.tag(CAST_LOG_TAG).w(
-                    "Media server failed to start: %s",
-                    MediaFileHttpServerService.lastFailureReason
+                    "Media server failed to start: %s (%s)",
+                    failureReason,
+                    detail
                 )
-                return false
+                when (failureReason) {
+                    MediaFileHttpServerService.FailureReason.NO_NETWORK_ADDRESS -> {
+                        emitCastError("Couldn't find a local Wi-Fi address for Cast.")
+                    }
+                    MediaFileHttpServerService.FailureReason.FOREGROUND_START_EXCEPTION -> {
+                        emitCastError("Couldn't start Cast service in foreground. ${detail ?: ""}".trim())
+                    }
+                    MediaFileHttpServerService.FailureReason.START_EXCEPTION -> {
+                        emitCastError("Cast HTTP server failed: ${detail ?: "unknown error"}")
+                    }
+                }
+                return@withLock false
             }
             delay(100)
         }
-        Timber.tag(CAST_LOG_TAG).w("Timed out waiting for media server startup")
-        return false
+        Timber.tag(CAST_LOG_TAG).w(
+            "Timed out waiting for media server startup (reason=%s detail=%s)",
+            MediaFileHttpServerService.lastFailureReason,
+            MediaFileHttpServerService.lastFailureMessage
+        )
+        val timeoutDetail = MediaFileHttpServerService.lastFailureMessage?.takeIf { it.isNotBlank() }
+        val timeoutState = "running=${MediaFileHttpServerService.isServerRunning}, " +
+            "starting=${MediaFileHttpServerService.isServerStarting}, " +
+            "addressSet=${MediaFileHttpServerService.serverAddress != null}"
+        emitCastError(
+            if (timeoutDetail != null) "Cast HTTP server timeout: $timeoutDetail"
+            else "Cast HTTP server startup timed out. ($timeoutState)"
+        )
+        return@withLock false
     }
 
     suspend fun playRemoteQueue(
@@ -811,7 +1041,8 @@ class CastTransferStateHolder @Inject constructor(
         startSong: Song,
         isShuffleEnabled: Boolean
     ): Boolean {
-        if (!ensureHttpServerRunning()) return false
+        val castDeviceIpHint = resolveCastDeviceIp(castStateHolder.castSession.value)
+        if (!ensureHttpServerRunning(castDeviceIpHint)) return false
 
         val serverAddress = MediaFileHttpServerService.serverAddress ?: return false
         val startIndex = songsToPlay.indexOf(startSong).coerceAtLeast(0)
@@ -840,7 +1071,7 @@ class CastTransferStateHolder @Inject constructor(
                 repeatMode = castRepeatMode,
                 serverAddress = serverAddress,
                 autoPlay = true,
-                onComplete = { success ->
+                onComplete = { success, detail ->
                     if (!success) {
                         pendingRemoteSongId = null
                         pendingRemoteSongMarkedAt = 0L
@@ -871,10 +1102,15 @@ class CastTransferStateHolder @Inject constructor(
                             onSongChanged?.invoke(previousStableSong.albumArtUriString)
                         }
                         Timber.tag(CAST_LOG_TAG).w(
-                            "Remote queue load failed for songId=%s (size=%d). Session kept active.",
+                            "Remote queue load failed for songId=%s (size=%d detail=%s). Session kept active.",
                             startSong.id,
-                            songsToPlay.size
+                            songsToPlay.size,
+                            detail
                         )
+                        val detailedMessage = detail?.takeIf { it.isNotBlank() }
+                        if (detailedMessage != null) {
+                            emitCastError("Failed to load media on Cast device: $detailedMessage")
+                        }
                         castStateHolder.castSession.value?.remoteMediaClient?.requestStatus()
                     } else {
                         lastRemoteQueue = songsToPlay
@@ -1041,6 +1277,7 @@ class CastTransferStateHolder @Inject constructor(
         onTransferBackComplete = null
         onSheetVisible = null
         onDisconnect = null
+        onCastError = null
         onSongChanged = null
         scope = null
         skipTransferBackOnNextSessionEnd = false

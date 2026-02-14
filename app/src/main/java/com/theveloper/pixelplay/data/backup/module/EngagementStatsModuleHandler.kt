@@ -30,7 +30,7 @@ class EngagementStatsModuleHandler @Inject constructor(
     override suspend fun snapshot(): String = export()
 
     override suspend fun restore(payload: String) = withContext(Dispatchers.IO) {
-        val type = object : TypeToken<List<SongEngagementEntity>>() {}.type
+        val type = TypeToken.getParameterized(List::class.java, SongEngagementEntity::class.java).type
         val stats: List<SongEngagementEntity> = gson.fromJson(payload, type)
         engagementDao.clearAllEngagements()
         if (stats.isNotEmpty()) {

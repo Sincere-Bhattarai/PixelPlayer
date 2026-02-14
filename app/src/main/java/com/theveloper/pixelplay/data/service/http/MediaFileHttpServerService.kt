@@ -22,7 +22,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
-import io.ktor.server.netty.*
+import io.ktor.server.cio.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.CoroutineScope
@@ -37,13 +37,17 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetSocketAddress
 import java.net.Inet4Address
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.net.SocketException
 import java.nio.channels.ClosedChannelException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.max
 import javax.inject.Inject
 import timber.log.Timber
 
@@ -53,7 +57,12 @@ class MediaFileHttpServerService : Service() {
     @Inject
     lateinit var musicRepository: MusicRepository
 
-    private var server: NettyApplicationEngine? = null
+    private var server: ApplicationEngine? = null
+    @Volatile
+    private var startInProgress = false
+    private val serverStartLock = Any()
+    @Volatile
+    private var castDeviceIpHint: String? = null
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private val castHttpLogTag = "CastHttpServer"
@@ -77,14 +86,26 @@ class MediaFileHttpServerService : Service() {
     companion object {
         const val ACTION_START_SERVER = "ACTION_START_SERVER"
         const val ACTION_STOP_SERVER = "ACTION_STOP_SERVER"
+        const val EXTRA_CAST_DEVICE_IP = "EXTRA_CAST_DEVICE_IP"
+        @Volatile
         var isServerRunning = false
+        @Volatile
+        var isServerStarting = false
+        @Volatile
         var serverAddress: String? = null
         @Volatile
+        var serverHostAddress: String? = null
+        @Volatile
+        var serverPrefixLength: Int = -1
+        @Volatile
         var lastFailureReason: FailureReason? = null
+        @Volatile
+        var lastFailureMessage: String? = null
     }
 
     enum class FailureReason {
         NO_NETWORK_ADDRESS,
+        FOREGROUND_START_EXCEPTION,
         START_EXCEPTION
     }
 
@@ -103,6 +124,21 @@ class MediaFileHttpServerService : Service() {
         val inputStreamFactory: () -> InputStream
     )
 
+    private data class LocalAddressCandidate(
+        val hostAddress: String,
+        val address: Inet4Address,
+        val prefixLength: Int,
+        val isActiveNetwork: Boolean,
+        val isValidated: Boolean,
+        val hasInternet: Boolean
+    )
+
+    private data class AddressSelection(
+        val hostAddress: String,
+        val prefixLength: Int,
+        val matchedCastSubnet: Boolean
+    )
+
     override fun onCreate() {
         super.onCreate()
         startForegroundService()
@@ -110,8 +146,15 @@ class MediaFileHttpServerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_STOP_SERVER -> stopSelf()
+            ACTION_STOP_SERVER -> {
+                castDeviceIpHint = null
+                stopSelf()
+            }
             ACTION_START_SERVER, null -> {
+                castDeviceIpHint = intent
+                    ?.getStringExtra(EXTRA_CAST_DEVICE_IP)
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
                 // Ensure we are in foreground immediately if started this way.
                 startForegroundService()
                 startServer()
@@ -124,53 +167,101 @@ class MediaFileHttpServerService : Service() {
     }
 
     private fun startForegroundService() {
-        val channelId = "pixelplay_cast_server"
-        val channelName = "Cast Media Server"
-        
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val channel = android.app.NotificationChannel(
-                channelId,
-                channelName,
-                android.app.NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            manager.createNotificationChannel(channel)
-        }
+        runCatching {
+            val channelId = "pixelplay_cast_server"
+            val channelName = "Cast Media Server"
+            
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val channel = android.app.NotificationChannel(
+                    channelId,
+                    channelName,
+                    android.app.NotificationManager.IMPORTANCE_LOW
+                )
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                manager.createNotificationChannel(channel)
+            }
 
-        val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Casting to device")
-            .setContentText("Serving media to Cast device")
-            .setSmallIcon(android.R.drawable.ic_menu_upload) // Placeholder, ideally use app icon
-            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-            .build()
+            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                .setContentTitle("Casting to device")
+                .setContentText("Serving media to Cast device")
+                .setSmallIcon(android.R.drawable.ic_menu_upload) // Placeholder, ideally use app icon
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+                .build()
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            startForeground(
-                1002, 
-                notification, 
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            )
-        } else {
-            startForeground(1002, notification)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                startForeground(
+                    1002, 
+                    notification, 
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(1002, notification)
+            }
+        }.onFailure { throwable ->
+            lastFailureReason = FailureReason.FOREGROUND_START_EXCEPTION
+            lastFailureMessage = "${throwable.javaClass.simpleName}: ${throwable.message ?: "Unknown"}"
+            Timber.e(throwable, "Failed to enter foreground mode for cast HTTP server")
+            stopSelf()
         }
     }
 
     private fun startServer() {
-        if (server?.application?.isActive != true) {
-            serviceScope.launch {
-                try {
-                    val ipAddress = getIpAddress(applicationContext)
-                    if (ipAddress == null) {
-                        Timber.w("No suitable IP address found; cannot start HTTP server")
-                        lastFailureReason = FailureReason.NO_NETWORK_ADDRESS
-                        stopSelf()
-                        return@launch
-                    }
-                    serverAddress = "http://$ipAddress:8080"
-                    lastFailureReason = null
+        synchronized(serverStartLock) {
+            if (server?.application?.isActive == true || startInProgress) {
+                return
+            }
+            startInProgress = true
+            isServerStarting = true
+        }
 
-                    server = embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
+        serviceScope.launch {
+            try {
+                lastFailureReason = null
+                lastFailureMessage = null
+                isServerRunning = false
+
+                val addressSelection = selectIpAddress(
+                    context = applicationContext,
+                    castDeviceIpHint = castDeviceIpHint
+                )
+                if (addressSelection == null) {
+                    Timber.w("No suitable IP address found; cannot start HTTP server")
+                    lastFailureReason = FailureReason.NO_NETWORK_ADDRESS
+                    lastFailureMessage = buildString {
+                        append("No LAN IPv4 address available")
+                        castDeviceIpHint?.let { append(" (castDeviceIp=$it)") }
+                    }
+                    stopSelf()
+                    return@launch
+                }
+                val serverPort = resolveServerPort(preferredPort = 8080)
+                if (serverPort != 8080) {
+                    Timber.tag(castHttpLogTag).w(
+                        "Port 8080 is already in use. Falling back to port %d for Cast HTTP server.",
+                        serverPort
+                    )
+                }
+                serverHostAddress = addressSelection.hostAddress
+                serverPrefixLength = addressSelection.prefixLength
+                serverAddress = "http://${addressSelection.hostAddress}:$serverPort"
+                Timber.tag(castHttpLogTag).i(
+                    "Selected cast server host=%s prefix=%d castHint=%s matchedCastSubnet=%s",
+                    addressSelection.hostAddress,
+                    addressSelection.prefixLength,
+                    castDeviceIpHint,
+                    addressSelection.matchedCastSubnet
+                )
+                lastFailureReason = null
+                lastFailureMessage = null
+
+                server = embeddedServer(CIO, port = serverPort, host = "0.0.0.0") {
                         routing {
+                            get("/health") {
+                                call.respond(HttpStatusCode.OK, "ok")
+                            }
+                            head("/health") {
+                                call.respond(HttpStatusCode.OK)
+                            }
                             get("/song/{songId}") {
                                 val songId = call.parameters["songId"]
                                 if (songId == null) {
@@ -425,37 +516,150 @@ class MediaFileHttpServerService : Service() {
                                 }
                             }
                         }
-                    }.start(wait = false)
-                    isServerRunning = true
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to start HTTP cast server")
-                    lastFailureReason = FailureReason.START_EXCEPTION
-                    stopSelf()
+                }.start(wait = false)
+                isServerRunning = true
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to start HTTP cast server")
+                lastFailureReason = FailureReason.START_EXCEPTION
+                lastFailureMessage = "${e.javaClass.simpleName}: ${e.message ?: "Unknown"}"
+                isServerRunning = false
+                serverAddress = null
+                stopSelf()
+            } finally {
+                synchronized(serverStartLock) {
+                    startInProgress = false
+                    isServerStarting = false
                 }
             }
         }
     }
 
-    private fun getIpAddress(context: Context): String? {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-
-        // Cast playback needs a LAN-reachable address (Wi-Fi/Ethernet), not mobile/VPN.
-        val localLanAddress = connectivityManager.allNetworks.asSequence()
-            .mapNotNull { network ->
-                val caps = connectivityManager.getNetworkCapabilities(network)
-                val linkProps = connectivityManager.getLinkProperties(network)
-                if (caps?.isLocalLanTransport() == true && linkProps != null) {
-                    linkProps.linkAddresses
-                        .asSequence()
-                        .mapNotNull { it.address as? Inet4Address }
-                        .firstOrNull { !it.isLoopbackAddress && !it.isLinkLocalAddress }
-                } else {
-                    null
-                }
+    private fun resolveServerPort(preferredPort: Int): Int {
+        val startPort = preferredPort.coerceIn(1, 65535)
+        val candidatePorts = sequence {
+            yield(startPort)
+            val upperBound = (startPort + 20).coerceAtMost(65535)
+            for (port in (startPort + 1)..upperBound) {
+                yield(port)
             }
-            .firstOrNull()
+        }
 
-        return localLanAddress?.hostAddress
+        candidatePorts.firstOrNull { isPortAvailable(it) }?.let { return it }
+
+        return runCatching {
+            ServerSocket(0).use { socket ->
+                max(socket.localPort, 1)
+            }
+        }.getOrDefault(startPort)
+    }
+
+    private fun isPortAvailable(port: Int): Boolean {
+        if (port !in 1..65535) return false
+        return runCatching {
+            ServerSocket().use { socket ->
+                socket.reuseAddress = true
+                socket.bind(InetSocketAddress("0.0.0.0", port))
+                true
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun selectIpAddress(context: Context, castDeviceIpHint: String?): AddressSelection? {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork
+
+        val candidates = mutableListOf<LocalAddressCandidate>()
+        for (network in connectivityManager.allNetworks) {
+            val caps = connectivityManager.getNetworkCapabilities(network) ?: continue
+            if (!caps.isLocalLanTransport()) continue
+            val linkProps = connectivityManager.getLinkProperties(network) ?: continue
+            val isActiveNetwork = network == activeNetwork
+
+            for (linkAddress in linkProps.linkAddresses) {
+                val ipv4 = linkAddress.address as? Inet4Address ?: continue
+                if (ipv4.isLoopbackAddress || ipv4.isLinkLocalAddress) continue
+                val hostAddress = ipv4.hostAddress ?: continue
+                candidates += LocalAddressCandidate(
+                    hostAddress = hostAddress,
+                    address = ipv4,
+                    prefixLength = linkAddress.prefixLength.coerceIn(0, 32),
+                    isActiveNetwork = isActiveNetwork,
+                    isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                    hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                )
+            }
+        }
+
+        if (candidates.isEmpty()) return null
+
+        val castAddress = parseIpv4Address(castDeviceIpHint)
+        if (castAddress != null) {
+            val subnetMatches = candidates
+                .filter { candidate ->
+                    isSameSubnet(candidate.address, castAddress, candidate.prefixLength)
+                }
+                .sortedByBestCandidate()
+            if (subnetMatches.isNotEmpty()) {
+                val selected = subnetMatches.first()
+                return AddressSelection(
+                    hostAddress = selected.hostAddress,
+                    prefixLength = selected.prefixLength,
+                    matchedCastSubnet = true
+                )
+            }
+            Timber.tag(castHttpLogTag).w(
+                "No LAN interface matched Cast subnet for castDeviceIp=%s; falling back to best LAN interface.",
+                castDeviceIpHint
+            )
+        }
+
+        val selected = candidates
+            .sortedByBestCandidate()
+            .firstOrNull()
+            ?: return null
+
+        return AddressSelection(
+            hostAddress = selected.hostAddress,
+            prefixLength = selected.prefixLength,
+            matchedCastSubnet = false
+        )
+    }
+
+    private fun List<LocalAddressCandidate>.sortedByBestCandidate(): List<LocalAddressCandidate> {
+        return sortedWith(
+            compareByDescending<LocalAddressCandidate> { it.isActiveNetwork }
+                .thenByDescending { it.isValidated }
+                .thenByDescending { it.hasInternet }
+                .thenByDescending { it.prefixLength }
+                .thenByDescending { it.hostAddress }
+        )
+    }
+
+    private fun parseIpv4Address(rawAddress: String?): Inet4Address? {
+        val normalized = rawAddress?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val parsed = runCatching { InetAddress.getByName(normalized) }.getOrNull() ?: return null
+        return parsed as? Inet4Address
+    }
+
+    private fun isSameSubnet(localAddress: Inet4Address, remoteAddress: Inet4Address, prefixLength: Int): Boolean {
+        val clampedPrefix = prefixLength.coerceIn(0, 32)
+        if (clampedPrefix == 0) return true
+        val localInt = localAddress.toIntAddress()
+        val remoteInt = remoteAddress.toIntAddress()
+        val mask = if (clampedPrefix == 32) {
+            -1
+        } else {
+            (-1 shl (32 - clampedPrefix))
+        }
+        return (localInt and mask) == (remoteInt and mask)
+    }
+
+    private fun Inet4Address.toIntAddress(): Int {
+        val bytes = address
+        return ((bytes[0].toInt() and 0xFF) shl 24) or
+            ((bytes[1].toInt() and 0xFF) shl 16) or
+            ((bytes[2].toInt() and 0xFF) shl 8) or
+            (bytes[3].toInt() and 0xFF)
     }
 
     private fun NetworkCapabilities.isLocalLanTransport(): Boolean {
@@ -1180,8 +1384,14 @@ class MediaFileHttpServerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isServerRunning = false
+        isServerStarting = false
         serverAddress = null
-        lastFailureReason = null
+        serverHostAddress = null
+        serverPrefixLength = -1
+        castDeviceIpHint = null
+        synchronized(serverStartLock) {
+            startInProgress = false
+        }
 
         val serverInstance = server
         server = null
@@ -1196,8 +1406,6 @@ class MediaFileHttpServerService : Service() {
                 Timber.e(e, "MediaFileHttpServerService: Error stopping Ktor server")
             }
         }.start()
-
-        serviceJob.cancel()
     }
 
     override fun onBind(intent: Intent?): IBinder? {

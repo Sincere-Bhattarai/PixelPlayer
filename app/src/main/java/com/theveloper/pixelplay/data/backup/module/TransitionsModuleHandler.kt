@@ -30,7 +30,7 @@ class TransitionsModuleHandler @Inject constructor(
     override suspend fun snapshot(): String = export()
 
     override suspend fun restore(payload: String) = withContext(Dispatchers.IO) {
-        val type = object : TypeToken<List<TransitionRuleEntity>>() {}.type
+        val type = TypeToken.getParameterized(List::class.java, TransitionRuleEntity::class.java).type
         val rules: List<TransitionRuleEntity> = gson.fromJson(payload, type)
         transitionDao.clearAllRules()
         if (rules.isNotEmpty()) {

@@ -986,7 +986,7 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             castStateHolder.selectedRoute.collect { route ->
                 if (route != null && !route.isDefault && route.supportsControlCategory(MediaControlIntent.CATEGORY_REMOTE_PLAYBACK)) {
-                    castTransferStateHolder.ensureHttpServerRunning()
+                    castTransferStateHolder.primeHttpServerStart()
                 } else if (route?.isDefault == true) {
                     val hasActiveRemoteSession = castStateHolder.castSession.value?.remoteMediaClient != null ||
                             castStateHolder.isRemotePlaybackActive.value ||
@@ -1145,6 +1145,9 @@ class PlayerViewModel @Inject constructor(
             onTransferBackComplete = { startProgressUpdates() },
             onSheetVisible = { _isSheetVisible.value = true },
             onDisconnect = { disconnect() },
+            onCastError = { message ->
+                viewModelScope.launch { _toastEvents.emit(message) }
+            },
             onSongChanged = { uriString ->
                 castSongUiSyncJob?.cancel()
                 castSongUiSyncJob = viewModelScope.launch {
@@ -2949,6 +2952,15 @@ class PlayerViewModel @Inject constructor(
     fun selectRoute(route: MediaRouter.RouteInfo) {
         val selectedRouteId = castStateHolder.selectedRoute.value?.id
         val isCastRoute = route.isCastRoute() && !route.isDefault
+        if (isCastRoute && sessionManager == null) {
+            castStateHolder.setPendingCastRouteId(null)
+            castStateHolder.setCastConnecting(false)
+            viewModelScope.launch {
+                _toastEvents.emit("Cast is unavailable right now. Restart the app and try again.")
+            }
+            Timber.tag(CAST_LOG_TAG).e("Cannot select Cast route: SessionManager is null")
+            return
+        }
         // Use castStateHolder.isRemotePlaybackActive directly
         val isSwitchingBetweenRemotes = isCastRoute &&
                 (castStateHolder.isRemotePlaybackActive.value || castStateHolder.isCastConnecting.value) &&
@@ -2972,6 +2984,12 @@ class PlayerViewModel @Inject constructor(
             }
         } else {
             castStateHolder.setPendingCastRouteId(null)
+        }
+
+        if (isCastRoute) {
+            // Start the HTTP cast server while app is certainly foreground to avoid
+            // foreground-service start restrictions when session callbacks arrive.
+            castTransferStateHolder.primeHttpServerStart()
         }
 
         castStateHolder.selectRoute(route)

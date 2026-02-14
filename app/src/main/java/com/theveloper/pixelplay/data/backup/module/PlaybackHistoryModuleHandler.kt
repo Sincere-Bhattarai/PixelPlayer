@@ -39,7 +39,7 @@ class PlaybackHistoryModuleHandler @Inject constructor(
     override suspend fun snapshot(): String = export()
 
     override suspend fun restore(payload: String) = withContext(Dispatchers.IO) {
-        val type = object : TypeToken<List<PlaybackHistoryBackupEntry>>() {}.type
+        val type = TypeToken.getParameterized(List::class.java, PlaybackHistoryBackupEntry::class.java).type
         val entries: List<PlaybackHistoryBackupEntry> = gson.fromJson(payload, type)
         playbackStatsRepository.importEventsFromBackup(
             events = entries.map { entry ->

@@ -33,7 +33,7 @@ class PlaylistsModuleHandler @Inject constructor(
     override suspend fun snapshot(): String = export()
 
     override suspend fun restore(payload: String) = withContext(Dispatchers.IO) {
-        val type = object : TypeToken<List<PreferenceBackupEntry>>() {}.type
+        val type = TypeToken.getParameterized(List::class.java, PreferenceBackupEntry::class.java).type
         val entries: List<PreferenceBackupEntry> = gson.fromJson(payload, type)
         userPreferencesRepository.clearPreferencesByKeys(PLAYLIST_KEYS)
         if (entries.isNotEmpty()) {

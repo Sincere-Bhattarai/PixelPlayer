@@ -23,7 +23,7 @@ class BackupHistoryRepository @Inject constructor(
         const val MAX_HISTORY_ENTRIES = 10
     }
 
-    private val listType = object : TypeToken<List<BackupHistoryEntry>>() {}.type
+    private val listType = TypeToken.getParameterized(List::class.java, BackupHistoryEntry::class.java).type
 
     val historyFlow: Flow<List<BackupHistoryEntry>> = dataStore.data.map { preferences ->
         val json = preferences[BACKUP_HISTORY_KEY]

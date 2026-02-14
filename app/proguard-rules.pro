@@ -57,6 +57,32 @@
 
 -keepattributes Signature, InnerClasses, EnclosingMethod, AnnotationDefault, *Annotation*
 
+# Cast framework classes loaded via manifest/reflective entry points.
+-keep class com.theveloper.pixelplay.data.service.cast.CastOptionsProvider { *; }
+-keep class * implements com.google.android.gms.cast.framework.OptionsProvider
+
+# Gson generic type capture for backup/restore in release builds.
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keep class * extends com.google.gson.reflect.TypeToken
+-keep class com.theveloper.pixelplay.data.preferences.PreferenceBackupEntry { *; }
+-keep class com.theveloper.pixelplay.data.backup.model.** { *; }
+-keep class com.theveloper.pixelplay.data.backup.module.** { *; }
+
+# Netty channel classes are instantiated reflectively and require public no-arg constructors.
+# Without these, release builds can fail with:
+# "IllegalArgumentException: Class NioServerSocketChannel does not have a public non-arg constructor"
+-keep class io.netty.channel.socket.nio.NioServerSocketChannel { public <init>(); }
+-keep class io.netty.channel.socket.nio.NioSocketChannel { public <init>(); }
+-keep class io.netty.channel.epoll.EpollServerSocketChannel { public <init>(); }
+-keep class io.netty.channel.epoll.EpollSocketChannel { public <init>(); }
+-keep class io.netty.channel.kqueue.KQueueServerSocketChannel { public <init>(); }
+-keep class io.netty.channel.kqueue.KQueueSocketChannel { public <init>(); }
+
+# Ktor server engine classes (CIO and internals) — prevent R8 from stripping
+# service-loaded or reflectively-accessed engine wiring.
+-keep class io.ktor.** { *; }
+-keep class kotlinx.coroutines.** { *; }
+
 # Please add these rules to your existing keep rules in order to suppress warnings.
 # This is generated automatically by the Android Gradle plugin.
 

@@ -219,11 +219,11 @@ class CastPlayer(
         repeatMode: Int,
         serverAddress: String,
         autoPlay: Boolean,
-        onComplete: (Boolean) -> Unit
+        onComplete: (Boolean, String?) -> Unit
     ) {
         val client = remoteMediaClient
         if (client == null) {
-            onComplete(false)
+            onComplete(false, "RemoteMediaClient is null")
             return
         }
 
@@ -236,7 +236,7 @@ class CastPlayer(
             if (!callbackFired) {
                 callbackFired = true
                 Timber.e("Cast loadQueue timed out after %d ms", queueLoadTimeoutMs)
-                onComplete(false)
+                onComplete(false, "Timed out after ${queueLoadTimeoutMs}ms")
             }
         }
 
@@ -317,9 +317,10 @@ class CastPlayer(
                         client.pause()
                     }
                     // Immediately acknowledge success and request a status update to avoid UI stalls.
-                    onComplete(true)
+                    onComplete(true, null)
                     client.requestStatus()
                 } else {
+                    val failureDetail = "status=${result.status.statusCode} msg=${result.status.statusMessage ?: "unknown"}"
                     Timber.tag(castLogTag).e(
                         "queueLoad failed statusCode=%d message=%s startSongId=%s size=%d",
                         result.status.statusCode,
@@ -331,7 +332,7 @@ class CastPlayer(
                         "PX_CAST_QLOAD",
                         "failed status=${result.status.statusCode} msg=${result.status.statusMessage} songId=${startSong?.id} size=${songs.size}"
                     )
-                    onComplete(false)
+                    onComplete(false, failureDetail)
                 }
             }
         } catch (e: Exception) {
@@ -339,7 +340,7 @@ class CastPlayer(
             Timber.tag(castLogTag).e(e, "queueLoad threw exception (size=%d startIndex=%d)", songs.size, startIndex)
             if (!callbackFired) {
                 callbackFired = true
-                onComplete(false)
+                onComplete(false, "${e.javaClass.simpleName}: ${e.message ?: "Unknown"}")
             }
         }
     }

@@ -34,7 +34,7 @@ class ArtistImagesModuleHandler @Inject constructor(
     override suspend fun snapshot(): String = export()
 
     override suspend fun restore(payload: String) = withContext(Dispatchers.IO) {
-        val type = object : TypeToken<List<ArtistImageBackupEntry>>() {}.type
+        val type = TypeToken.getParameterized(List::class.java, ArtistImageBackupEntry::class.java).type
         val entries: List<ArtistImageBackupEntry> = gson.fromJson(payload, type)
         entries.forEach { entry ->
             val artistId = musicDao.getArtistIdByName(entry.artistName) ?: return@forEach
