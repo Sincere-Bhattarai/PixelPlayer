@@ -38,6 +38,7 @@ import javax.inject.Singleton
 import kotlin.coroutines.resume
 
 import com.theveloper.pixelplay.data.telegram.TelegramRepository
+import com.theveloper.pixelplay.data.netease.NeteaseStreamProxy
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSpec
@@ -58,6 +59,7 @@ class DualPlayerEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val telegramRepository: TelegramRepository,
     private val telegramStreamProxy: com.theveloper.pixelplay.data.telegram.TelegramStreamProxy,
+    private val neteaseStreamProxy: NeteaseStreamProxy,
     private val telegramCacheManager: com.theveloper.pixelplay.data.telegram.TelegramCacheManager,
     private val connectivityStateHolder: com.theveloper.pixelplay.presentation.viewmodel.ConnectivityStateHolder
 ) {
@@ -369,6 +371,16 @@ class DualPlayerEngine @Inject constructor(
                          if (proxyUrl.isNotEmpty()) {
                              return dataSpec.buildUpon().setUri(android.net.Uri.parse(proxyUrl)).build()
                          }
+                     }
+                 } else if (dataSpec.uri.scheme == "netease") {
+                     val neteaseSongId = dataSpec.uri.host?.toLongOrNull()
+                     if (neteaseSongId != null) {
+                         val proxyUrl = neteaseStreamProxy.getProxyUrl(neteaseSongId)
+                         if (proxyUrl.isNotEmpty()) {
+                             Timber.tag("DualPlayerEngine").d("Resolving Netease URI for songId: $neteaseSongId")
+                             return dataSpec.buildUpon().setUri(android.net.Uri.parse(proxyUrl)).build()
+                         }
+                         Timber.tag("DualPlayerEngine").w("Netease proxy not ready for songId=$neteaseSongId; playback may fail")
                      }
                  }
                  return dataSpec

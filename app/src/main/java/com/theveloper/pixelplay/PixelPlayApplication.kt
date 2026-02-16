@@ -25,6 +25,9 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
 
     @Inject
     lateinit var telegramStreamProxy: com.theveloper.pixelplay.data.telegram.TelegramStreamProxy
+
+    @Inject
+    lateinit var neteaseStreamProxy: com.theveloper.pixelplay.data.netease.NeteaseStreamProxy
     
     @Inject
     lateinit var telegramCacheManager: com.theveloper.pixelplay.data.telegram.TelegramCacheManager
@@ -64,6 +67,7 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
         }
         
         telegramStreamProxy.start()
+        neteaseStreamProxy.start()
         
         // Trigger robust cache cleanup on startup to remove orphaned files from previous sessions
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
