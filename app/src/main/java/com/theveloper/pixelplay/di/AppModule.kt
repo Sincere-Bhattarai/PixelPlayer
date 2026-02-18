@@ -399,7 +399,7 @@ object AppModule {
                 okhttp3.ConnectionSpec.CLEARTEXT
             ))
             .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .writeTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
             // Enable built-in retry on connection failure
             .retryOnConnectionFailure(true)
@@ -411,6 +411,25 @@ object AppModule {
                     .header("Accept", "application/json")
                     .build()
                 chain.proceed(requestWithHeaders)
+            }
+            // Retry interceptor for "unexpected end of stream" errors
+            // retryOnConnectionFailure only retries connection setup, NOT stream read errors
+            .addInterceptor { chain ->
+                val request = chain.request()
+                var lastException: java.io.IOException? = null
+                for (attempt in 0..2) {
+                    try {
+                        if (attempt > 0) {
+                            Thread.sleep(500L * attempt) // backoff: 500ms, 1000ms
+                            android.util.Log.d("OkHttp-Retry", "Retry attempt $attempt for ${request.url}")
+                        }
+                        return@addInterceptor chain.proceed(request)
+                    } catch (e: java.io.IOException) {
+                        lastException = e
+                        android.util.Log.w("OkHttp-Retry", "Attempt $attempt failed: ${e.message}")
+                    }
+                }
+                throw lastException!!
             }
             .addInterceptor(loggingInterceptor)
             .build()

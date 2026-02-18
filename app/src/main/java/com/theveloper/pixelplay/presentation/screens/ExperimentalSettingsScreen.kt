@@ -229,6 +229,20 @@ fun ExperimentalSettingsScreen(
                                 }
                             )
 
+                            SwitchSettingItem(
+                                title = "Animated Lyrics (High-end devices)",
+                                subtitle = "Uses spring animations and visual effects for lyrics. May cause frame drops on low-end devices.",
+                                checked = uiState.useAnimatedLyrics,
+                                onCheckedChange = settingsViewModel::setUseAnimatedLyrics,
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MusicNote,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            )
+
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
                                 modifier = Modifier

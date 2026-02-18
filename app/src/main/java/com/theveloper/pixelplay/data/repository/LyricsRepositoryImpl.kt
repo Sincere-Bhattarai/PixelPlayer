@@ -332,6 +332,9 @@ class LyricsRepositoryImpl @Inject constructor(
             val useSimplifiedStrategy =
                 simplifiedArtist != cleanArtist || simplifiedTitle != cleanTitle
 
+            // Track which title variant was used for the successful search
+            var effectiveTitle = cleanTitle
+
             val searchStrategies = buildList {
                 add(
                     RemoteSearchStrategy("track+artist") {
@@ -350,11 +353,24 @@ class LyricsRepositoryImpl @Inject constructor(
                         }
                     )
                 }
+                
+                // Smart title cleanup strategy (removes leading digits/spaces and truncates at -, (, ))
+                val smartTitle = cleanTitleSmart(cleanTitle)
+                if (smartTitle != cleanTitle && smartTitle.isNotBlank()) {
+                    Log.d(TAG, "Adding smart search strategy for: '$smartTitle' (orig: '$cleanTitle')")
+                    add(RemoteSearchStrategy("smart_track_only") {
+                        lrcLibApiService.searchLyrics(trackName = smartTitle)
+                    })
+                }
             }
 
             var results = runSearchStrategiesFast(searchStrategies)
+            
+            // Check if results came from a smart/simplified strategy  
+            // by seeing if the effective title should be updated
+            val smartTitle = cleanTitleSmart(cleanTitle)
 
-            // Strategy 4: Aggressive fallback - remove artist and trim title at separators (-, ,, (, ), $, #, :, %)
+            // Strategy 4: Aggressive fallback - remove artist and trim title at separators
             if (results.isEmpty()) {
                  val separators = charArrayOf('-', ',', '(', ')', '$', '#', ':', '%')
                  val index = cleanTitle.indexOfAny(separators)
@@ -362,6 +378,7 @@ class LyricsRepositoryImpl @Inject constructor(
                      val superCleanTitle = cleanTitle.substring(0, index).trim()
                      if (superCleanTitle.isNotEmpty()) {
                           Log.d(TAG, "Strategy 4: Searching with super simplified title: '$superCleanTitle' (no artist)")
+                          effectiveTitle = superCleanTitle
                           val fallbackResults = runCatching {
                                 lrcLibApiService.searchLyrics(trackName = superCleanTitle)
                           }.getOrNull()
@@ -377,18 +394,26 @@ class LyricsRepositoryImpl @Inject constructor(
                 return@withContext null
             }
 
-            // Find best match - prioritize exact matches, then synced lyrics (matching Rhythm)
+            // Find best match - prioritize exact matches, then synced lyrics
+            // Use effectiveTitle for matching to avoid rejecting results from fallback strategies
             val songDurationSeconds = song.duration / 1000
+            val matchTitle = effectiveTitle
             val bestMatch = results.firstOrNull { result ->
                 val artistMatch = result.artistName.lowercase().contains(cleanArtist.lowercase()) ||
                         cleanArtist.lowercase().contains(result.artistName.lowercase())
-                val titleMatch = result.name.lowercase().contains(cleanTitle.lowercase()) ||
-                        cleanTitle.lowercase().contains(result.name.lowercase())
+                val titleMatch = result.name.lowercase().contains(matchTitle.lowercase()) ||
+                        matchTitle.lowercase().contains(result.name.lowercase())
                 val durationDiff = abs(result.duration - songDurationSeconds)
 
                 (artistMatch && titleMatch) && durationDiff <= 15 && hasLyrics(result)
-            } ?: results.firstOrNull { hasSyncedLyrics(it) && abs(it.duration - songDurationSeconds) <= 15 }
-            ?: results.firstOrNull { hasLyrics(it) && abs(it.duration - songDurationSeconds) <= 15 }
+            } ?: results.firstOrNull { result ->
+                // Relaxed match: try with smart title or just check duration + lyrics
+                val titleMatch = result.name.lowercase().contains(smartTitle.lowercase()) ||
+                        smartTitle.lowercase().contains(result.name.lowercase())
+                titleMatch && hasSyncedLyrics(result) && abs(result.duration - songDurationSeconds) <= 30
+            }
+            ?: results.firstOrNull { hasSyncedLyrics(it) && abs(it.duration - songDurationSeconds) <= 15 }
+            ?: results.firstOrNull { hasLyrics(it) && abs(it.duration - songDurationSeconds) <= 30 }
 
             if (bestMatch != null) {
                 val rawLyrics = bestMatch.syncedLyrics ?: bestMatch.plainLyrics
@@ -865,20 +890,31 @@ class LyricsRepositoryImpl @Inject constructor(
             val cleanArtist = song.displayArtist.trim()
 
             // FAST STRATEGY: run all requests in parallel, keep first non-empty batch
-            val strategies = listOf(
-                RemoteSearchStrategy("query+artist") {
+            // FAST STRATEGY: run all requests in parallel, keep first non-empty batch
+            val strategies = buildList {
+                add(RemoteSearchStrategy("query+artist") {
                     lrcLibApiService.searchLyrics(query = combinedQuery, artistName = cleanArtist)
-                },
-                RemoteSearchStrategy("track+artist") {
+                })
+                add(RemoteSearchStrategy("track+artist") {
                     lrcLibApiService.searchLyrics(trackName = cleanTitle, artistName = cleanArtist)
-                },
-                RemoteSearchStrategy("track_only") {
-                    lrcLibApiService.searchLyrics(trackName = cleanTitle)
-                },
-                RemoteSearchStrategy("query_title_only") {
-                    lrcLibApiService.searchLyrics(query = cleanTitle)
+                })
+                
+                // Smart title cleanup strategy
+                val smartTitle = cleanTitleSmart(cleanTitle)
+                if (smartTitle != cleanTitle && smartTitle.isNotBlank()) {
+                    LogUtils.d(this@LyricsRepositoryImpl, "Adding smart search strategy for: '$smartTitle' (orig: '$cleanTitle')")
+                    add(RemoteSearchStrategy("smart_track_only") {
+                        lrcLibApiService.searchLyrics(trackName = smartTitle)
+                    })
                 }
-            )
+
+                add(RemoteSearchStrategy("track_only") {
+                    lrcLibApiService.searchLyrics(trackName = cleanTitle)
+                })
+                add(RemoteSearchStrategy("query_title_only") {
+                    lrcLibApiService.searchLyrics(query = cleanTitle)
+                })
+            }
 
             val uniqueResults = runSearchStrategiesFast(strategies)
 
@@ -1159,6 +1195,20 @@ class LyricsRepositoryImpl @Inject constructor(
             LogUtils.e(this, e, "Error creating temp file from URI")
             null
         }
+    }
+
+    private fun cleanTitleSmart(title: String): String {
+        // 1. Remove leading digits/spaces/dots/hyphens (e.g., "01 ", "01. ", "01 - ")
+        var cleaned = title.replace(Regex("^[\\d\\s.\\-]+"), "")
+        
+        // 2. Truncate at first special char (-, (, ))
+        // "Taare Ginn - Envy" -> "Taare Ginn "
+        // "Song (Feat. X)" -> "Song "
+        val splitRegex = Regex("[-()]")
+        cleaned = cleaned.split(splitRegex).firstOrNull() ?: cleaned
+        
+        // 3. Trim whitespace
+        return cleaned.trim()
     }
 }
 

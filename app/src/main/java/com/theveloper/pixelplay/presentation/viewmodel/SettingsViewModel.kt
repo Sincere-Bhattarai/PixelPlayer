@@ -74,6 +74,7 @@ data class SettingsUiState(
     val hapticsEnabled: Boolean = true,
     val immersiveLyricsEnabled: Boolean = false,
     val immersiveLyricsTimeout: Long = 4000L,
+    val useAnimatedLyrics: Boolean = false,
     val backupInfoDismissed: Boolean = false,
     val isDataTransferInProgress: Boolean = false,
     val restorePlan: RestorePlan? = null,
@@ -313,6 +314,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferencesRepository.usePlayerSheetV2Flow.collect { enabled ->
                 _uiState.update { it.copy(usePlayerSheetV2 = enabled) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.useAnimatedLyricsFlow.collect { enabled ->
+                _uiState.update { it.copy(useAnimatedLyrics = enabled) }
             }
         }
 
@@ -567,6 +574,12 @@ class SettingsViewModel @Inject constructor(
     fun setUsePlayerSheetV2(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setUsePlayerSheetV2(enabled)
+        }
+    }
+
+    fun setUseAnimatedLyrics(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setUseAnimatedLyrics(enabled)
         }
     }
 

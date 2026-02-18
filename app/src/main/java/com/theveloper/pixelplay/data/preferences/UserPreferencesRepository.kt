@@ -189,6 +189,7 @@ constructor(
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         val IMMERSIVE_LYRICS_ENABLED = booleanPreferencesKey("immersive_lyrics_enabled")
         val IMMERSIVE_LYRICS_TIMEOUT = longPreferencesKey("immersive_lyrics_timeout")
+        val USE_ANIMATED_LYRICS = booleanPreferencesKey("use_animated_lyrics")
         
         // Genre View Preference
         val IS_GENRE_GRID_VIEW = booleanPreferencesKey("is_genre_grid_view")
@@ -1466,6 +1467,17 @@ constructor(
     suspend fun setUsePlayerSheetV2(enabled: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.USE_PLAYER_SHEET_V2] = enabled
+        }
+    }
+
+    val useAnimatedLyricsFlow: Flow<Boolean> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.USE_ANIMATED_LYRICS] ?: false
+        }
+
+    suspend fun setUseAnimatedLyrics(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.USE_ANIMATED_LYRICS] = enabled
         }
     }
 
