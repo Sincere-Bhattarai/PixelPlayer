@@ -993,6 +993,20 @@ constructor(
     }
 
     /**
+     * Checks if a metadata field from MediaStore is a default/unknown placeholder.
+     * MediaStore uses `<unknown>` for unreadable fields, and our normalization
+     * may fall back to `"Unknown Artist"` / `"Unknown Album"` etc.
+     */
+    private fun isDefaultMetadata(value: String): Boolean {
+        val lower = value.trim().lowercase()
+        return lower.isEmpty() ||
+            lower == "<unknown>" ||
+            lower == "unknown" ||
+            lower == "unknown artist" ||
+            lower == "unknown album"
+    }
+
+    /**
      * Process a single song's raw data into a SongEntity. This is the CPU/IO intensive work that
      * benefits from parallelization.
      */
@@ -1036,7 +1050,13 @@ constructor(
                         raw.filePath.endsWith(".opus", true) ||
                         raw.filePath.endsWith(".ogg", true) ||
                         raw.filePath.endsWith(".oga", true) ||
-                        raw.filePath.endsWith(".aiff", true)
+                        raw.filePath.endsWith(".aiff", true) ||
+                        // Fallback: if MediaStore returned default/missing metadata,
+                        // try TagLib+JAudioTagger to read actual tags from the file.
+                        // MediaStore uses "<unknown>" for unreadable fields;
+                        // our normalization may produce "Unknown Artist"/"Unknown Album".
+                        isDefaultMetadata(raw.artist) ||
+                        isDefaultMetadata(raw.album)
 
         if (shouldAugmentMetadata) {
             val file = java.io.File(raw.filePath)

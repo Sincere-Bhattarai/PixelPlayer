@@ -3,7 +3,10 @@ package com.theveloper.pixelplay.data.media
 import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import com.kyant.taglib.TagLib
+import org.jaudiotagger.audio.AudioFileIO
+import org.jaudiotagger.tag.FieldKey
 import timber.log.Timber
 import java.io.File
 
@@ -29,9 +32,11 @@ data class AudioMetadataArtwork(
 
 object AudioMetadataReader {
 
+    private const val TAG = "AudioMetadataReader"
+
     fun read(context: Context, uri: Uri): AudioMetadata? {
         val tempFile = createTempAudioFileFromUri(context, uri) ?: run {
-            Timber.tag("AudioMetadataReader").w("Unable to create temp file for uri: $uri")
+            Timber.tag(TAG).w("Unable to create temp file for uri: $uri")
             return null
         }
 
@@ -41,7 +46,7 @@ object AudioMetadataReader {
             try {
                 tempFile.delete()
             } catch (e: Exception) {
-                Timber.tag("AudioMetadataReader").w(e, "Failed to delete temp file")
+                Timber.tag(TAG).w(e, "Failed to delete temp file")
             }
         }
     }
@@ -59,6 +64,9 @@ object AudioMetadataReader {
                 val metadata = TagLib.getMetadata(fd.dup().detachFd(), readPictures = false)
                 val propertyMap = metadata?.propertyMap ?: emptyMap()
 
+                // Log ALL keys TagLib returned so we can diagnose mapping issues
+                Log.w(TAG, "TagLib propertyMap keys for ${file.name}: ${propertyMap.keys}")
+
                 val title = propertyMap["TITLE"]?.firstOrNull()?.takeIf { it.isNotBlank() }
                 val artist = propertyMap["ARTIST"]?.firstOrNull()?.takeIf { it.isNotBlank() }
                 val albumArtist = propertyMap["ALBUMARTIST"]?.firstOrNull()?.takeIf { it.isNotBlank() }
@@ -74,6 +82,8 @@ object AudioMetadataReader {
                 val year = propertyMap["DATE"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.take(4)?.toIntOrNull()
                     ?: propertyMap["YEAR"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.toIntOrNull()
 
+                Log.w(TAG, "TagLib result for ${file.name}: title=$title, artist=$artist, album=$album, genre=$genre")
+
                 // Get artwork
                 val pictures = TagLib.getPictures(fd.detachFd())
                 val artwork = pictures.firstOrNull()?.let { picture ->
@@ -85,23 +95,94 @@ object AudioMetadataReader {
                     }
                 }
 
+                // Fallback: if TagLib couldn't read title OR artist, try JAudioTagger.
+                // This handles files with non-standard ID3 frames (e.g. 48kHz MP3s from ffmpeg).
+                val fallback = if (title == null || artist == null) {
+                    Log.w(TAG, "TagLib incomplete for ${file.name}, trying JAudioTagger fallback...")
+                    readWithJAudioTagger(file)
+                } else null
+
                 AudioMetadata(
-                    title = title,
-                    artist = artist,
-                    albumArtist = albumArtist,
-                    album = album,
-                    genre = genre,
-                    lyrics = lyrics,
-                    durationMs = durationMs,
-                    trackNumber = trackNumber,
-                    year = year,
-                    bitrate = bitrate,
-                    sampleRate = sampleRate,
-                    artwork = artwork
+                    title = title ?: fallback?.title,
+                    artist = artist ?: fallback?.artist,
+                    albumArtist = albumArtist ?: fallback?.albumArtist,
+                    album = album ?: fallback?.album,
+                    genre = genre ?: fallback?.genre,
+                    lyrics = lyrics ?: fallback?.lyrics,
+                    durationMs = durationMs ?: fallback?.durationMs,
+                    trackNumber = trackNumber ?: fallback?.trackNumber,
+                    year = year ?: fallback?.year,
+                    bitrate = bitrate ?: fallback?.bitrate,
+                    sampleRate = sampleRate ?: fallback?.sampleRate,
+                    artwork = artwork ?: fallback?.artwork
                 )
             }
         } catch (error: Exception) {
-            Timber.tag("AudioMetadataReader").e(error, "Unable to read metadata from file: ${file.absolutePath}")
+            Timber.tag(TAG).e(error, "Unable to read metadata from file: ${file.absolutePath}")
+            null
+        }
+    }
+
+    /**
+     * Fallback reader using JAudioTagger for files where TagLib can't map ID3 frames.
+     * Only called when TagLib fails to read both title and artist.
+     */
+    private fun readWithJAudioTagger(file: File): AudioMetadata? {
+        return try {
+            // Suppress JAudioTagger's verbose logging
+            java.util.logging.Logger.getLogger("org.jaudiotagger").level = java.util.logging.Level.OFF
+
+            val audioFile = AudioFileIO.read(file)
+            val tag = audioFile.tag
+            val header = audioFile.audioHeader
+
+            Log.w(TAG, "JAudioTagger: tag class=${tag?.javaClass?.simpleName}, " +
+                    "header=${header?.format}, sampleRate=${header?.sampleRateAsNumber}")
+
+            val title = tag?.getFirst(FieldKey.TITLE)?.takeIf { it.isNotBlank() }
+            val artist = tag?.getFirst(FieldKey.ARTIST)?.takeIf { it.isNotBlank() }
+            val albumArtist = tag?.getFirst(FieldKey.ALBUM_ARTIST)?.takeIf { it.isNotBlank() }
+            val album = tag?.getFirst(FieldKey.ALBUM)?.takeIf { it.isNotBlank() }
+            val genre = tag?.getFirst(FieldKey.GENRE)?.takeIf { it.isNotBlank() }
+            val lyrics = tag?.getFirst(FieldKey.LYRICS)?.takeIf { it.isNotBlank() }
+            val trackNumber = tag?.getFirst(FieldKey.TRACK)?.takeIf { it.isNotBlank() }
+                ?.substringBefore('/')?.toIntOrNull()
+            val year = tag?.getFirst(FieldKey.YEAR)?.takeIf { it.isNotBlank() }
+                ?.take(4)?.toIntOrNull()
+
+            val durationMs = header?.trackLength?.takeIf { it > 0 }?.let { it * 1000L }
+            val bitrate = header?.bitRateAsNumber?.takeIf { it > 0 }?.toInt()
+            val sampleRate = header?.sampleRateAsNumber?.takeIf { it > 0 }
+
+            // Try to get artwork from JAudioTagger
+            val artwork = tag?.firstArtwork?.let { art ->
+                art.binaryData?.takeIf { it.isNotEmpty() && isValidImageData(it) }?.let { data ->
+                    AudioMetadataArtwork(
+                        bytes = data,
+                        mimeType = art.mimeType?.takeIf { it.isNotBlank() } ?: guessImageMimeType(data)
+                    )
+                }
+            }
+
+            Log.w(TAG, "JAudioTagger result for ${file.name}: title=$title, artist=$artist, " +
+                    "album=$album, genre=$genre, artwork=${artwork != null}")
+
+            AudioMetadata(
+                title = title,
+                artist = artist,
+                albumArtist = albumArtist,
+                album = album,
+                genre = genre,
+                lyrics = lyrics,
+                durationMs = durationMs,
+                trackNumber = trackNumber,
+                year = year,
+                bitrate = bitrate,
+                sampleRate = sampleRate,
+                artwork = artwork
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "JAudioTagger fallback FAILED for: ${file.name}", e)
             null
         }
     }

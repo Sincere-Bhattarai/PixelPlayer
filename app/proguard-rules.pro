@@ -44,6 +44,9 @@
 # Rules for TagLib
 -keep class com.kyant.taglib.** { *; }
 
+# Rules for JAudioTagger (fallback metadata reader)
+-keep class org.jaudiotagger.** { *; }
+
 # [NUEVO] Regla general para mantener metadatos de Kotlin, puede ayudar a R8
 -keep class kotlin.Metadata { *; }
 

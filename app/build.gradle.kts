@@ -280,6 +280,8 @@ dependencies {
 
     // TagLib for metadata editing (supports mp3, flac, m4a, etc.)
     implementation(libs.taglib)
+    // JAudioTagger fallback for files where TagLib can't map ID3 frames (e.g. 48kHz ffmpeg encodes)
+    implementation(libs.jaudiotagger)
     // VorbisJava for Opus/Ogg metadata editing (TagLib has issues with Opus via file descriptors)
     implementation(libs.vorbisjava.core)
 
