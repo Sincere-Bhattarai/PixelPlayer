@@ -57,5 +57,8 @@ data class PlayerUiState(
     val searchQuery: String = "",
     val isSyncingLibrary: Boolean = false,
     val selectedSearchFilter: SearchFilterType = SearchFilterType.ALL,
-    val currentStorageFilter: com.theveloper.pixelplay.data.model.StorageFilter = com.theveloper.pixelplay.data.model.StorageFilter.ALL
+    val currentStorageFilter: com.theveloper.pixelplay.data.model.StorageFilter = com.theveloper.pixelplay.data.model.StorageFilter.ALL,
+    val showQueueItemUndoBar: Boolean = false,
+    val lastRemovedQueueSong: Song? = null,
+    val lastRemovedQueueIndex: Int = -1
 )
