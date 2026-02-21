@@ -5,6 +5,7 @@ import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 // import androidx.compose.ui.platform.LocalView // No longer needed for this
 // import androidx.core.view.WindowInsetsCompat // No longer needed for this
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
@@ -74,7 +75,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.core.net.toUri
@@ -90,6 +90,8 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.theveloper.pixelplay.data.github.GitHubAnnouncementPropertiesService
+import com.theveloper.pixelplay.data.github.PlayStoreAnnouncementRemoteConfig
 import com.theveloper.pixelplay.data.preferences.AppThemeMode
 import com.theveloper.pixelplay.data.preferences.NavBarStyle
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
@@ -106,6 +108,9 @@ import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
 import com.theveloper.pixelplay.presentation.components.NavBarContentHeight
 import com.theveloper.pixelplay.presentation.components.NavBarContentHeightFullWidth
 import com.theveloper.pixelplay.presentation.components.PlayerInternalNavigationBar
+import com.theveloper.pixelplay.presentation.components.PlayStoreAnnouncementDefaults
+import com.theveloper.pixelplay.presentation.components.PlayStoreAnnouncementDialog
+import com.theveloper.pixelplay.presentation.components.PlayStoreAnnouncementUiModel
 import com.theveloper.pixelplay.presentation.components.UnifiedPlayerSheet
 import com.theveloper.pixelplay.presentation.components.UnifiedPlayerSheetV2
 import com.theveloper.pixelplay.presentation.navigation.AppNavigation
@@ -399,6 +404,28 @@ class MainActivity : ComponentActivity() {
         intent.removeExtra(android.content.Intent.EXTRA_STREAM)
     }
 
+    private fun openExternalUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, url.toUri())
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            LogUtils.w(this, "No activity available to open URL: $url")
+        }
+    }
+
+    private fun PlayStoreAnnouncementRemoteConfig.toUiModel(): PlayStoreAnnouncementUiModel {
+        val fallback = PlayStoreAnnouncementDefaults.Template
+        return fallback.copy(
+            enabled = enabled,
+            playStoreUrl = playStoreUrl ?: fallback.playStoreUrl,
+            title = title ?: fallback.title,
+            body = body ?: fallback.body,
+            primaryActionLabel = primaryActionLabel ?: fallback.primaryActionLabel,
+            dismissActionLabel = dismissActionLabel ?: fallback.dismissActionLabel,
+            linkPendingMessage = linkPendingMessage ?: fallback.linkPendingMessage,
+        )
+    }
+
     @androidx.annotation.OptIn(UnstableApi::class)
     @Composable
     private fun MainAppContent(playerViewModel: PlayerViewModel, mainViewModel: MainViewModel) {
@@ -573,6 +600,30 @@ class MainActivity : ComponentActivity() {
 
         val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val scope = rememberCoroutineScope()
+        val announcementService = remember { GitHubAnnouncementPropertiesService() }
+        var playStoreAnnouncement by remember { mutableStateOf(PlayStoreAnnouncementDefaults.Template) }
+        var showPlayStoreAnnouncement by remember { mutableStateOf(false) }
+
+        LaunchedEffect(Unit) {
+            if (PlayStoreAnnouncementDefaults.LOCAL_PREVIEW_ENABLED) {
+                playStoreAnnouncement = PlayStoreAnnouncementDefaults.HardcodedPreview
+                showPlayStoreAnnouncement = true
+                return@LaunchedEffect
+            }
+
+            announcementService.fetchPlayStoreAnnouncement()
+                .onSuccess { remoteConfig ->
+                    val resolvedAnnouncement = remoteConfig.toUiModel()
+                    playStoreAnnouncement = resolvedAnnouncement
+                    showPlayStoreAnnouncement = resolvedAnnouncement.enabled
+                }
+                .onFailure { throwable ->
+                    LogUtils.w(
+                        this@MainActivity,
+                        "Remote announcement unavailable. Keeping popup disabled. ${throwable.message ?: ""}",
+                    )
+                }
+        }
 
         CompositionLocalProvider(
             LocalAppHapticsConfig provides appHapticsConfig,
@@ -813,6 +864,17 @@ class MainActivity : ComponentActivity() {
                                 onUndo = onUndoDismissPlaylist,
                                 onClose = onCloseDismissUndoBar,
                                 durationMillis = dismissUndoBarSlice.durationMillis
+                            )
+                        }
+
+                        if (showPlayStoreAnnouncement) {
+                            PlayStoreAnnouncementDialog(
+                                announcement = playStoreAnnouncement,
+                                onDismiss = { showPlayStoreAnnouncement = false },
+                                onOpenPlayStore = { url ->
+                                    showPlayStoreAnnouncement = false
+                                    openExternalUrl(url)
+                                }
                             )
                         }
                     }
