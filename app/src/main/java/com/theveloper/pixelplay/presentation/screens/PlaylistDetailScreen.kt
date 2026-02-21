@@ -898,7 +898,7 @@ fun PlaylistDetailScreen(
         // If in Manual mode, show SongDefaultOrder as selected; otherwise use the stored sort option
         val currentSortOption = if (isManualMode) {
             SortOption.SongDefaultOrder
-        } else if ((isFolderPlaylist || currentPlaylist != null) && rawOption != null) {
+        } else if (currentPlaylist != null) {
             rawOption
         } else {
             SortOption.SongTitleAZ

@@ -43,7 +43,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -227,76 +226,85 @@ fun SearchScreen(
                     .fillMaxWidth()
                     .padding(horizontal = safePadding) // Usar padding seguro
             ) {
+                val onSearchExpandedChange: (Boolean) -> Unit = { expanded ->
+                    if (!expanded && searchQuery.isNotBlank()) {
+                        playerViewModel.onSearchQuerySubmitted(searchQuery)
+                    }
+                    active = expanded
+                }
+
+                val searchBarInputFieldColors = SearchBarDefaults.inputFieldColors(
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    cursorColor = MaterialTheme.colorScheme.primary
+                )
+
                 SearchBar(
-                    query = searchQuery,
-                    onQueryChange = {
-                        searchQuery = it
-                        playerViewModel.updateSearchQuery(it)
+                    inputField = {
+                        SearchBarDefaults.InputField(
+                            query = searchQuery,
+                            onQueryChange = {
+                                searchQuery = it
+                                playerViewModel.updateSearchQuery(it)
+                            },
+                            onSearch = { query ->
+                                if (query.isNotBlank()) {
+                                    playerViewModel.onSearchQuerySubmitted(query)
+                                }
+                                active = false
+                            },
+                            expanded = active,
+                            onExpandedChange = onSearchExpandedChange,
+                            placeholder = {
+                                Text(
+                                    "Search...",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = "Buscar",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotBlank()) {
+                                    IconButton(
+                                        onClick = { searchQuery = "" },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .padding(end = 10.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                                            )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = "Limpiar",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            },
+                            colors = searchBarInputFieldColors
+                        )
                     },
-                    onSearch = {
-                        if (searchQuery.isNotBlank()) {
-                            playerViewModel.onSearchQuerySubmitted(searchQuery)
-                        }
-                        active = false
-                    },
-                    active = active,
-                    onActiveChange = {
-                        if (!it) {
-                            if (searchQuery.isNotBlank()) {
-                                playerViewModel.onSearchQuerySubmitted(searchQuery)
-                            }
-                        }
-                        active = it
-                    },
+                    expanded = active,
+                    onExpandedChange = onSearchExpandedChange,
                     modifier = Modifier
                         .fillMaxWidth()
                         .animateContentSize()
                         .clip(RoundedCornerShape(searchbarCornerRadius)),
-                    placeholder = {
-                        Text(
-                            "Search...",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = "Buscar",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotBlank()) {
-                            IconButton(
-                                onClick = { searchQuery = "" },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .padding(end = 10.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-                                    )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Close,
-                                    contentDescription = "Limpiar",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    },
                     colors = SearchBarDefaults.colors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
                         dividerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                        inputFieldColors = TextFieldDefaults.colors(
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            cursorColor = MaterialTheme.colorScheme.primary
-                        )
+                        inputFieldColors = searchBarInputFieldColors
                     ),
                     content = {
                         Column(
