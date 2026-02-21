@@ -20,8 +20,13 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.WavyProgressIndicatorDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -39,6 +44,8 @@ import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import kotlinx.coroutines.isActive
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
@@ -104,6 +111,46 @@ fun WavySliderExpressive(
         label = "amplitude"
     )
 
+    // Keep visual progress interpolation out of composition:
+    // update this state on frame clock, then consume it only inside draw lambdas.
+    // This preserves smooth visuals while avoiding high-frequency recompositions.
+    val renderedNormalizedProgress = remember { mutableFloatStateOf(normalizedValue) }
+    var lastProgressUpdateNanos by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(normalizedValue, isInteracting, enabled) {
+        val target = normalizedValue.coerceIn(0f, 1f)
+        if (!enabled || isInteracting) {
+            renderedNormalizedProgress.floatValue = target
+            lastProgressUpdateNanos = System.nanoTime()
+            return@LaunchedEffect
+        }
+
+        val nowNanos = System.nanoTime()
+        val intervalMs = if (lastProgressUpdateNanos == 0L) {
+            180L
+        } else {
+            ((nowNanos - lastProgressUpdateNanos) / 1_000_000L).coerceAtLeast(1L)
+        }
+        lastProgressUpdateNanos = nowNanos
+
+        val start = renderedNormalizedProgress.floatValue
+        if (abs(start - target) <= 0.0001f) {
+            renderedNormalizedProgress.floatValue = target
+            return@LaunchedEffect
+        }
+
+        val durationNanos = (intervalMs * 900_000L).coerceAtLeast(1_000_000L)
+        var startFrameNanos = 0L
+        while (isActive) {
+            val frameNanos = withFrameNanos { it }
+            if (startFrameNanos == 0L) startFrameNanos = frameNanos
+            val elapsedNanos = (frameNanos - startFrameNanos).coerceAtLeast(0L)
+            val fraction = (elapsedNanos.toDouble() / durationNanos.toDouble()).toFloat().coerceIn(0f, 1f)
+            renderedNormalizedProgress.floatValue = start + (target - start) * fraction
+            if (fraction >= 1f) break
+        }
+        renderedNormalizedProgress.floatValue = target
+    }
+
     val containerHeight = max(WavyProgressIndicatorDefaults.LinearContainerHeight, max(thumbRadius * 2, thumbLineHeightWhenInteracting))
 
     Box(
@@ -153,7 +200,7 @@ fun WavySliderExpressive(
         )
 
         LinearWavyProgressIndicator(
-            progress = { normalizedValue },
+            progress = { renderedNormalizedProgress.floatValue },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = trackEdgePadding.coerceAtLeast(0.dp))
@@ -176,6 +223,7 @@ fun WavySliderExpressive(
             val trackEnd = size.width - edgePaddingPx
             val trackWidth = (trackEnd - trackStart).coerceAtLeast(0f)
             val thumbY = size.height / 2
+            val renderedProgress = renderedNormalizedProgress.floatValue
 
             fun lerp(start: Float, stop: Float, fraction: Float): Float {
                 return start + (stop - start) * fraction
@@ -183,7 +231,7 @@ fun WavySliderExpressive(
 
             val currentWidth = lerp(thumbRadiusPx * 2f, strokeWidthPx * 1.2f, thumbInteractionFraction)
             val currentHeight = lerp(thumbRadiusPx * 2f, thumbLineHeightPx, thumbInteractionFraction)
-            val rawThumbX = trackStart + (trackWidth * normalizedValue)
+            val rawThumbX = trackStart + (trackWidth * renderedProgress)
             val minThumbCenter = (currentWidth / 2f).coerceAtMost(size.width / 2f)
             val maxThumbCenter = (size.width - currentWidth / 2f).coerceAtLeast(minThumbCenter)
             val thumbX = rawThumbX.coerceIn(minThumbCenter, maxThumbCenter)

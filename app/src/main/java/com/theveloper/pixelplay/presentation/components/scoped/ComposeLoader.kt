@@ -1,8 +1,5 @@
 package com.theveloper.pixelplay.presentation.components.scoped
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -16,8 +13,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlin.math.roundToInt
-import kotlin.math.roundToLong
 
 // ------------------------------------------------------------
 // 1) Phase loader: compose a subtree only after a threshold, then keep it alive
@@ -49,9 +44,9 @@ fun DeferUntil(
 }
 
 // ------------------------------------------------------------
-// 2) Smooth progress sampler for long-running sliders/meters
-// Cuts recompositions from ~50–60 FPS position updates down to ~5 FPS,
-// while animating the UI in between so it still looks 60 FPS.
+// 2) Progress sampler for long-running sliders/meters
+// Emits coarse progress snapshots; visual interpolation is handled in the draw phase
+// by the specific component that renders the slider/progress.
 // ------------------------------------------------------------
 @Composable
 fun rememberSmoothProgress(
@@ -63,56 +58,42 @@ fun rememberSmoothProgress(
     isVisible: Boolean = true
 ): Pair<androidx.compose.runtime.State<Float>, androidx.compose.runtime.State<Long>> {
     var sampledPosition by remember { mutableLongStateOf(0L) }
-    var targetFraction by remember { mutableFloatStateOf(0f) }
+    var sampledFraction by remember { mutableFloatStateOf(0f) }
 
     val latestPositionProvider by rememberUpdatedState(newValue = currentPositionProvider)
     val latestIsPlayingProvider by rememberUpdatedState(newValue = isPlayingProvider)
 
-    val safeDuration = totalDuration.coerceAtLeast(1L)
     val safeUpperBound = totalDuration.coerceAtLeast(0L)
+    val safeDuration = totalDuration.coerceAtLeast(1L)
 
     LaunchedEffect(totalDuration, sampleWhilePlayingMs, sampleWhilePausedMs, isVisible) {
+        fun sampleNow() {
+            val rawPosition = latestPositionProvider()
+            val clampedPosition = rawPosition.coerceIn(0L, safeUpperBound)
+            sampledPosition = clampedPosition
+            sampledFraction = (clampedPosition / safeDuration.toFloat()).coerceIn(0f, 1f)
+        }
+
+        sampleNow()
         if (!isVisible) return@LaunchedEffect
 
         while (isActive) {
             val isPlaying = latestIsPlayingProvider()
-            val rawPosition = latestPositionProvider()
-            val clampedPosition = rawPosition.coerceIn(0L, safeUpperBound)
-
-            sampledPosition = clampedPosition
-            targetFraction = (clampedPosition / safeDuration.toFloat()).coerceIn(0f, 1f)
-
             val delayMillis = if (isPlaying) sampleWhilePlayingMs else sampleWhilePausedMs
             delay(delayMillis.coerceAtLeast(1L))
+            sampleNow()
         }
     }
 
-    val isPlaying = latestIsPlayingProvider()
-    val animationDuration = ((if (isPlaying) sampleWhilePlayingMs else sampleWhilePausedMs) * 0.9f)
-        .roundToInt()
-        .coerceAtLeast(1)
-    
-    val smoothState = if (isVisible) {
-        animateFloatAsState(
-            targetValue = targetFraction,
-            animationSpec = tween(durationMillis = animationDuration, easing = LinearEasing),
-            label = "SmoothProgressAnim"
-        )
-    } else {
-        rememberUpdatedState(targetFraction)
+    val fractionState = remember {
+        derivedStateOf { sampledFraction }
     }
 
-    val animatedPositionState = remember(smoothState, safeDuration, totalDuration) {
+    val displayedPositionState = remember(totalDuration) {
         derivedStateOf {
-            (smoothState.value * safeDuration).roundToLong().coerceIn(0L, totalDuration)
-        }
-    }
-    
-    val displayedPositionState = remember(isPlaying, animatedPositionState, sampledPosition) {
-        derivedStateOf {
-            if (isPlaying) animatedPositionState.value else sampledPosition
+            sampledPosition.coerceIn(0L, totalDuration.coerceAtLeast(0L))
         }
     }
 
-    return smoothState to displayedPositionState
+    return fractionState to displayedPositionState
 }

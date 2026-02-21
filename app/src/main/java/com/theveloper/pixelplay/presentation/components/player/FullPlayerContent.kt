@@ -1391,6 +1391,7 @@ private fun EfficientSlider(
         value = valueState.value,
         onValueChange = onValueChange,
         onValueChangeFinished = onValueChangeFinished,
+        interactionSource = interactionSource,
         activeTrackColor = activeTrackColor,
         inactiveTrackColor = inactiveTrackColor,
         thumbColor = thumbColor,
