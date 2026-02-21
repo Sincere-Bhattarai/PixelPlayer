@@ -13,10 +13,12 @@ import com.theveloper.pixelplay.data.database.SongEntity
 import com.theveloper.pixelplay.data.database.toSong
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.network.netease.NeteaseApiService
+import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +34,7 @@ class NeteaseRepository @Inject constructor(
     private val api: NeteaseApiService,
     private val dao: NeteaseDao,
     private val musicDao: MusicDao,
+    private val userPreferencesRepository: UserPreferencesRepository,
     @ApplicationContext private val context: Context
 ) {
     data class BulkSyncResult(
@@ -46,6 +49,7 @@ class NeteaseRepository @Inject constructor(
         private const val NETEASE_ARTIST_ID_OFFSET = 5_000_000_000_000L
         private const val NETEASE_PARENT_DIRECTORY = "/Cloud/Netease"
         private const val NETEASE_GENRE = "Netease Cloud"
+        private const val NETEASE_PLAYLIST_PREFIX = "netease_playlist:"
     }
 
     private val prefs: SharedPreferences =
@@ -152,9 +156,16 @@ class NeteaseRepository @Inject constructor(
     suspend fun logout() {
         api.logout()
         clearLoginState()
+        
+        // Delete all Netease playlists from the database
+        val neteasePlaylistsToDelete = dao.getAllPlaylistsList()
+        neteasePlaylistsToDelete.forEach { playlist ->
+            dao.deleteSongsByPlaylist(playlist.id)
+            dao.deletePlaylist(playlist.id)
+            deleteAppPlaylistForNeteasePlaylist(playlist.id)
+        }
+        
         musicDao.clearAllNeteaseSongs()
-        dao.clearAllSongs()
-        dao.clearAllPlaylists()
         _isLoggedInFlow.value = false
     }
 
@@ -214,6 +225,8 @@ class NeteaseRepository @Inject constructor(
                 stalePlaylists.forEach { stale ->
                     dao.deleteSongsByPlaylist(stale.id)
                     dao.deletePlaylist(stale.id)
+                    // Delete corresponding app playlists for removed Netease playlists
+                    deleteAppPlaylistForNeteasePlaylist(stale.id)
                 }
 
                 entities.forEach { dao.insertPlaylist(it) }
@@ -258,6 +271,10 @@ class NeteaseRepository @Inject constructor(
 
                 dao.deleteSongsByPlaylist(playlistId)
                 dao.insertSongs(entities)
+                
+                // Create or update the corresponding app playlist
+                updateAppPlaylistForNeteasePlaylist(playlistId, playlist.optString("name", ""), entities)
+                
                 if (syncUnifiedLibrary) {
                     syncUnifiedLibrarySongsFromNetease()
                 }
@@ -618,7 +635,68 @@ class NeteaseRepository @Inject constructor(
     suspend fun deletePlaylist(playlistId: Long) {
         dao.deleteSongsByPlaylist(playlistId)
         dao.deletePlaylist(playlistId)
+        deleteAppPlaylistForNeteasePlaylist(playlistId)
         syncUnifiedLibrarySongsFromNetease()
+    }
+
+    // ─── App Playlist Management ────────────────────────────────────────
+
+    private suspend fun getAppPlaylistIdForNetease(neteasePlaylistId: Long): String {
+        return "$NETEASE_PLAYLIST_PREFIX$neteasePlaylistId"
+    }
+
+    private suspend fun updateAppPlaylistForNeteasePlaylist(
+        neteasePlaylistId: Long,
+        playlistName: String,
+        neteaseEntities: List<NeteaseSongEntity>
+    ) {
+        try {
+            // Convert Netease song entities to unified song IDs
+            val unifiedSongIds = neteaseEntities.map { entity ->
+                "netease_${entity.neteaseId}"
+            }
+
+            val appPlaylistId = getAppPlaylistIdForNetease(neteasePlaylistId)
+            
+            // Get all current app playlists
+            val allPlaylists = userPreferencesRepository.userPlaylistsFlow
+            val existingPlaylist = withContext(Dispatchers.IO) {
+                allPlaylists.map { playlists ->
+                    playlists.find { it.id == appPlaylistId }
+                }.first()
+            }
+
+            if (existingPlaylist != null) {
+                // Update the existing playlist
+                userPreferencesRepository.updatePlaylist(
+                    existingPlaylist.copy(
+                        name = playlistName,
+                        songIds = unifiedSongIds,
+                        lastModified = System.currentTimeMillis()
+                    )
+                )
+                Timber.d("Updated app playlist for Netease playlist $neteasePlaylistId: $playlistName")
+            } else {
+                // Create a new playlist
+                userPreferencesRepository.createPlaylist(
+                    name = playlistName,
+                    songIds = unifiedSongIds
+                )
+                Timber.d("Created new app playlist for Netease playlist $neteasePlaylistId: $playlistName")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update/create app playlist for Netease playlist $neteasePlaylistId")
+        }
+    }
+
+    private suspend fun deleteAppPlaylistForNeteasePlaylist(neteasePlaylistId: Long) {
+        try {
+            val appPlaylistId = getAppPlaylistIdForNetease(neteasePlaylistId)
+            userPreferencesRepository.deletePlaylist(appPlaylistId)
+            Timber.d("Deleted app playlist for Netease playlist $neteasePlaylistId")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to delete app playlist for Netease playlist $neteasePlaylistId")
+        }
     }
 
     // ─── Utility ───────────────────────────────────────────────────────
