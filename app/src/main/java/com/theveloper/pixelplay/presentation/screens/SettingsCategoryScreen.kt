@@ -678,6 +678,7 @@ fun SettingsCategoryScreen(
                                         label = "Crossfade Duration",
                                         value = uiState.crossfadeDuration.toFloat(),
                                         valueRange = 1000f..12000f,
+                                        steps= 10,
                                         onValueChange = { settingsViewModel.setCrossfadeDuration(it.toInt()) },
                                         valueText = { value -> "${(value / 1000).toInt()}s" }
                                     )

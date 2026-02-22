@@ -368,6 +368,7 @@ fun SliderSettingsItem(
         label: String,
         value: Float,
         valueRange: ClosedFloatingPointRange<Float>,
+        steps: Int,
         onValueChange: (Float) -> Unit,
         valueText: (Float) -> String
 ) {
@@ -392,7 +393,7 @@ fun SliderSettingsItem(
                         fontWeight = FontWeight.Bold
                 )
             }
-            Slider(value = value, onValueChange = onValueChange, valueRange = valueRange)
+            Slider(value = value, onValueChange = onValueChange, valueRange = valueRange, steps = steps)
         }
     }
 }
