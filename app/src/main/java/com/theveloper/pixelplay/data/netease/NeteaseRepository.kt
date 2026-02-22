@@ -673,17 +673,20 @@ class NeteaseRepository @Inject constructor(
                     existingPlaylist.copy(
                         name = playlistName,
                         songIds = unifiedSongIds,
-                        lastModified = System.currentTimeMillis()
+                        lastModified = System.currentTimeMillis(),
+                        source = "NETEASE" // Mark as NetEase source
                     )
                 )
                 Timber.d("Updated app playlist for Netease playlist $neteasePlaylistId: $playlistName")
             } else {
-                // Create a new playlist
+                // Create a new playlist with custom ID to prevent duplicates
                 userPreferencesRepository.createPlaylist(
                     name = playlistName,
-                    songIds = unifiedSongIds
+                    songIds = unifiedSongIds,
+                    customId = appPlaylistId,  // Use NetEase prefix ID for matching on next sync
+                    source = "NETEASE"         // Mark as NetEase source
                 )
-                Timber.d("Created new app playlist for Netease playlist $neteasePlaylistId: $playlistName")
+                Timber.d("Created new app playlist for Netease playlist $neteasePlaylistId: $playlistName with ID: $appPlaylistId")
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to update/create app playlist for Netease playlist $neteasePlaylistId")

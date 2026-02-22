@@ -2,7 +2,14 @@ package com.theveloper.pixelplay.presentation.components
 
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +32,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.MicExternalOn
@@ -60,6 +68,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Brush
@@ -84,12 +93,17 @@ import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.screens.PlayerSheetCollapsedCornerRadius
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
+import com.theveloper.pixelplay.presentation.viewmodel.PlaylistSelectionStateHolder
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.utils.getContrastColor
 import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import com.theveloper.pixelplay.utils.resolvePlaylistCoverContentColor
 import kotlin.collections.set
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material3.Badge
+import androidx.compose.foundation.combinedClickable
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -104,7 +118,13 @@ fun PlaylistContainer(
     playerViewModel: PlayerViewModel,
     isAddingToPlaylist: Boolean = false,
     selectedPlaylists: SnapshotStateMap<String, Boolean>? = null,
-    filteredPlaylists: List<Playlist> = playlistUiState.playlists
+    filteredPlaylists: List<Playlist> = playlistUiState.playlists,
+    // Multi-selection parameters for normal playlist browsing
+    isSelectionMode: Boolean = false,
+    selectedPlaylistIds: Set<String> = emptySet(),
+    onPlaylistLongPress: (Playlist) -> Unit = {},
+    onPlaylistSelectionToggle: (Playlist) -> Unit = {},
+    playlistSelectionStateHolder: PlaylistSelectionStateHolder? = null
 ) {
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -188,7 +208,12 @@ fun PlaylistContainer(
                         bottomBarHeight = bottomBarHeight,
                         navController = navController,
                         playerViewModel = playerViewModel,
-                        filteredPlaylists = filteredPlaylists
+                        filteredPlaylists = filteredPlaylists,
+                        // Multi-selection parameters
+                        isSelectionMode = isSelectionMode,
+                        selectedPlaylistIds = selectedPlaylistIds,
+                        onPlaylistLongPress = onPlaylistLongPress,
+                        onPlaylistSelectionToggle = onPlaylistSelectionToggle
                     )
                 }
             }
@@ -220,7 +245,12 @@ fun PlaylistItems(
     playerViewModel: PlayerViewModel,
     isAddingToPlaylist: Boolean = false,
     filteredPlaylists: List<Playlist>,
-    selectedPlaylists: SnapshotStateMap<String, Boolean>? = null
+    selectedPlaylists: SnapshotStateMap<String, Boolean>? = null,
+    // Multi-selection parameters
+    isSelectionMode: Boolean = false,
+    selectedPlaylistIds: Set<String> = emptySet(),
+    onPlaylistLongPress: (Playlist) -> Unit = {},
+    onPlaylistSelectionToggle: (Playlist) -> Unit = {}
 ) {
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -243,8 +273,8 @@ fun PlaylistItems(
                 .fillMaxSize()
                 .clip(
                     RoundedCornerShape(
-                        topStart = 26.dp,
-                        topEnd = 26.dp,
+                        topStart = 12.dp,
+                        topEnd = 12.dp,
                         bottomStart = PlayerSheetCollapsedCornerRadius,
                         bottomEnd = PlayerSheetCollapsedCornerRadius
                     )
@@ -259,8 +289,19 @@ fun PlaylistItems(
                         if (isAddingToPlaylist && currentSong != null && selectedPlaylists != null) {
                             val currentSelection = selectedPlaylists[playlist.id] ?: false
                             selectedPlaylists[playlist.id] = !currentSelection
-                        } else
+                        } else if (isSelectionMode) {
+                            onPlaylistSelectionToggle(playlist)
+                        } else {
                             navController?.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
+                        }
+                    }
+                }
+                // Calculate selection index for this playlist
+                val selectionIndex = remember(playlist.id, selectedPlaylistIds) {
+                    if (selectedPlaylistIds.contains(playlist.id)) {
+                        selectedPlaylistIds.toList().indexOf(playlist.id)
+                    } else {
+                        -1
                     }
                 }
                 PlaylistItem(
@@ -268,7 +309,13 @@ fun PlaylistItems(
                     playerViewModel = playerViewModel,
                     onClick = { rememberedOnClick() },
                     isAddingToPlaylist = isAddingToPlaylist,
-                    selectedPlaylists = selectedPlaylists
+                    selectedPlaylists = selectedPlaylists,
+                    // Multi-selection parameters
+                    isSelectionMode = isSelectionMode,
+                    isSelected = selectedPlaylistIds.contains(playlist.id),
+                    selectionIndex = selectionIndex,
+                    onLongPress = { onPlaylistLongPress(playlist) },
+                    onPlaylistSelectionToggle = { onPlaylistSelectionToggle(playlist) }
                 )
             }
         }
@@ -295,12 +342,64 @@ fun PlaylistItem(
     playerViewModel: PlayerViewModel,
     onClick: () -> Unit,
     isAddingToPlaylist: Boolean,
-    selectedPlaylists: SnapshotStateMap<String, Boolean>? = null
+    selectedPlaylists: SnapshotStateMap<String, Boolean>? = null,
+    // Multi-selection parameters
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    selectionIndex: Int = -1,
+    onLongPress: () -> Unit = {},
+    onPlaylistSelectionToggle: () -> Unit = {}
 ) {
     val allSongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
     val playlistSongs = remember(playlist.songIds, allSongs) {
         allSongs.filter { it.id in playlist.songIds }
     }
+
+    // Selection animation - subtle scale effect (参照 SONGS)
+    val selectionScale by animateFloatAsState(
+        targetValue = if (isSelected) 0.98f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "playlistSelectionScaleAnimation"
+    )
+
+    // Selection border width animation
+    val selectionBorderWidth by animateDpAsState(
+        targetValue = if (isSelected) 2.5.dp else 0.dp,
+        animationSpec = tween(durationMillis = 250),
+        label = "playlistSelectionBorderAnimation"
+    )
+
+    // Container color animation
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            isAddingToPlaylist -> MaterialTheme.colorScheme.surfaceContainerHigh
+            isSelected -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        animationSpec = tween(durationMillis = 300),
+        label = "playlistContainerColorAnimation"
+    )
+
+    // Content color animation
+    val contentColor by animateColorAsState(
+        targetValue = when {
+            isAddingToPlaylist -> MaterialTheme.colorScheme.onSurfaceVariant
+            isSelected -> MaterialTheme.colorScheme.onSecondaryContainer
+            else -> MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = tween(durationMillis = 300),
+        label = "playlistContentColorAnimation"
+    )
+
+    // Selection border color
+    val selectionBorderColor by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0f),
+        animationSpec = tween(durationMillis = 250),
+        label = "playlistBorderColorAnimation"
+    )
 
     // Shape Logic
     val shape = remember(playlist.coverShapeType, playlist.coverShapeDetail1, playlist.coverShapeDetail2, playlist.coverShapeDetail3) {
@@ -336,20 +435,7 @@ fun PlaylistItem(
     }
     
     // Mods
-    // For RotatedPill: We Rotate the Container (with the Shape).
-    // The Icon should be counter-rotated.
-    // The Image: If we rotate the container, the image rotates.
-    // If the user wants an "upright" image in a "diagonal" pill, we must counter-rotate the image too.
-    // In Creator: `iconMod` counter-rotates. Image didn't have counter-rotation. 
-    // Usually "Rotated Shape" implies the frame is rotated. Image handles itself. 
-    // Let's keep existing rotation logic but apply the Narrow Pill Shape.
     val shapeMod = if(playlist.coverShapeType == PlaylistShapeType.RotatedPill.name) Modifier.graphicsLayer(rotationZ = 45f) else Modifier
-    // Counter rotate content?
-    // If I rotate the container 45deg, the image is tilted.
-    // If I want upright image, I apply counter-rotation to the Image.
-    // Let's check Creator behavior: It didn't counter-rotate image.
-    // I will stick to Creator behavior for consistency, or fix it if it looks bad.
-    // Providing a rotated pill frame usually implies distinct style.
     val iconMod = if(playlist.coverShapeType == PlaylistShapeType.RotatedPill.name) Modifier.graphicsLayer(rotationZ = -45f) else Modifier
     
     val scaleMod = if(playlist.coverShapeType == PlaylistShapeType.Star.name) {
@@ -358,12 +444,36 @@ fun PlaylistItem(
     } else Modifier
 
     Card(
-        onClick = onClick,
         modifier = Modifier
-            .fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isAddingToPlaylist) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow
-        )
+            .fillMaxWidth()
+            .scale(selectionScale)
+            .then(
+                if (isSelected && !isAddingToPlaylist) {
+                    Modifier.border(
+                        width = selectionBorderWidth,
+                        color = selectionBorderColor,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .combinedClickable(
+                onClick = {
+                    if (isSelectionMode) {
+                        // In selection mode: toggle selection
+                        onPlaylistSelectionToggle()
+                    } else {
+                        // Normal mode: open playlist details
+                        onClick()
+                    }
+                },
+                onLongClick = {
+                    // Long press: initiate or toggle selection
+                    onLongPress()
+                }
+            ),
+        colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -400,6 +510,35 @@ fun PlaylistItem(
                         modifier = Modifier.fillMaxSize()
                     )
                }
+               
+               // Selection check overlay on cover (matching SONGS style)
+               if (isSelected && isSelectionMode) {
+                   Box(
+                       modifier = Modifier
+                           .fillMaxSize()
+                           .background(
+                               color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                               shape = shape
+                           ),
+                       contentAlignment = Alignment.Center
+                   ) {
+                       if (selectionIndex >= 0) {
+                           Text(
+                               text = "${selectionIndex + 1}",
+                               style = MaterialTheme.typography.titleSmall,
+                               fontWeight = FontWeight.Bold,
+                               color = MaterialTheme.colorScheme.onPrimary
+                           )
+                       } else {
+                           Icon(
+                               imageVector = Icons.Rounded.CheckCircle,
+                               contentDescription = "Selected",
+                               tint = MaterialTheme.colorScheme.onPrimary,
+                               modifier = Modifier.size(24.dp)
+                           )
+                       }
+                   }
+               }
             }
 
             Spacer(modifier = Modifier.width(16.dp))
@@ -424,6 +563,15 @@ fun PlaylistItem(
                             contentDescription = "AI Generated",
                             tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    if (playlist.source == "NETEASE") {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            painter = painterResource(R.drawable.netease_cloud_music_logo_icon_206716__1_),
+                            contentDescription = "Netease Cloud Music",
+                            tint = Color.Unspecified,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }

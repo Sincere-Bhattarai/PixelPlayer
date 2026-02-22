@@ -846,12 +846,14 @@ constructor(
             coverShapeDetail1: Float? = null,
             coverShapeDetail2: Float? = null,
             coverShapeDetail3: Float? = null,
-            coverShapeDetail4: Float? = null
+            coverShapeDetail4: Float? = null,
+            customId: String? = null,  // Support custom ID for NetEase sync de-duplication
+            source: String = "LOCAL"   // Source tag
     ): Playlist {
         val currentPlaylists = userPlaylistsFlow.first().toMutableList()
         val newPlaylist =
                 Playlist(
-                        id = UUID.randomUUID().toString(),
+                        id = customId ?: UUID.randomUUID().toString(),  // Use custom ID or UUID
                         name = name,
                         songIds = songIds,
                         isAiGenerated = isAiGenerated,
@@ -863,7 +865,8 @@ constructor(
                         coverShapeDetail1 = coverShapeDetail1,
                         coverShapeDetail2 = coverShapeDetail2,
                         coverShapeDetail3 = coverShapeDetail3,
-                        coverShapeDetail4 = coverShapeDetail4
+                        coverShapeDetail4 = coverShapeDetail4,
+                        source = source // Set source
                 )
         currentPlaylists.add(newPlaylist)
         savePlaylists(currentPlaylists)

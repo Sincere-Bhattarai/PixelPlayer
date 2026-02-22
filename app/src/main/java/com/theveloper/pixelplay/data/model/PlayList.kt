@@ -21,7 +21,8 @@ data class Playlist(
     val coverShapeDetail1: Float? = null, // e.g., CornerRadius / StarCurve
     val coverShapeDetail2: Float? = null, // e.g., Smoothness / StarRotation
     val coverShapeDetail3: Float? = null, // e.g., StarScale
-    val coverShapeDetail4: Float? = null // e.g., Star Sides (Int)
+    val coverShapeDetail4: Float? = null, // e.g., Star Sides (Int)
+    val source: String = "LOCAL" // Source: "LOCAL", "NETEASE", "AI", etc.
 )
 
 enum class PlaylistShapeType {

@@ -47,10 +47,14 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Deselect
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material.icons.rounded.ViewModule
 import com.theveloper.pixelplay.presentation.components.ToggleSegmentButton
 import androidx.compose.material3.LoadingIndicator
@@ -126,6 +130,7 @@ import com.theveloper.pixelplay.presentation.components.SongInfoBottomSheet
 import com.theveloper.pixelplay.presentation.components.subcomps.LibraryActionRow
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.components.MultiSelectionBottomSheet
+import com.theveloper.pixelplay.presentation.components.PlaylistMultiSelectionBottomSheet
 import com.theveloper.pixelplay.presentation.components.PlaylistCreationTypeDialog
 import com.theveloper.pixelplay.presentation.components.CreateAiPlaylistDialog
 import com.theveloper.pixelplay.presentation.components.subcomps.SelectionActionRow
@@ -167,6 +172,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -300,6 +308,26 @@ fun LibraryScreen(
 
     val onSongSelectionToggle: (Song) -> Unit = remember(multiSelectionState) {
         { song -> multiSelectionState.toggleSelection(song) }
+    }
+
+    // Playlist multi-selection state and callbacks
+    val playlistMultiSelectionState = playerViewModel.playlistSelectionStateHolder
+    val selectedPlaylists by playlistMultiSelectionState.selectedPlaylists.collectAsState()
+    val selectedPlaylistIds by playlistMultiSelectionState.selectedPlaylistIds.collectAsState()
+    var showPlaylistMultiSelectionSheet by remember { mutableStateOf(false) }
+    var showMergePlaylistDialog by remember { mutableStateOf(false) }
+    var pendingMergePlaylistIds by remember { mutableStateOf(emptyList<String>()) }
+
+    val onPlaylistLongPress: (com.theveloper.pixelplay.data.model.Playlist) -> Unit = remember(playlistMultiSelectionState) {
+        { playlist ->
+            // Only toggle selection, don't show sheet immediately (similar to songs multi-selection)
+            playlistMultiSelectionState.toggleSelection(playlist)
+            android.util.Log.d("PlaylistMultiSelect", "Toggled: ${playlist.name}, total selected: ${playlistMultiSelectionState.selectedPlaylists.value.size}")
+        }
+    }
+
+    val onPlaylistSelectionToggle: (com.theveloper.pixelplay.data.model.Playlist) -> Unit = remember(playlistMultiSelectionState) {
+        { playlist -> playlistMultiSelectionState.toggleSelection(playlist) }
     }
 
     val stableOnMoreOptionsClick: (Song) -> Unit = remember {
@@ -626,9 +654,12 @@ fun LibraryScreen(
                             val distinctByKey = ensured.distinctBy { it.storageKey }
                             distinctByKey.ifEmpty { listOf(currentTabId.defaultSort) }
                         }
+
                         val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
                         val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
                         val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+                        val isPlaylistSelectionMode by playlistMultiSelectionState.isSelectionMode.collectAsState()
+
                         val favoritePagingItems = libraryViewModel.favoritesPagingFlow.collectAsLazyPagingItems()
 
                         val currentSelectedSortOption: SortOption? = when (currentTabId) {
@@ -671,7 +702,7 @@ fun LibraryScreen(
 
                         // Switch between normal action row and selection action row
                         AnimatedContent(
-                            targetState = isSelectionMode,
+                            targetState = isSelectionMode || isPlaylistSelectionMode,
                             label = "ActionRowModeSwitch",
                             transitionSpec = {
                                 (slideInHorizontally { -it } + fadeIn()) togetherWith
@@ -686,28 +717,149 @@ fun LibraryScreen(
                                 .heightIn(min = 56.dp)
                         ) { inSelectionMode ->
                             if (inSelectionMode) {
-                                SelectionActionRow(
-                                    selectedCount = selectedSongs.size,
-                                    onSelectAll = {
-                                        val songsToSelect = when (tabTitles.getOrNull(currentTabIndex)?.toLibraryTabIdOrNull()) {
-                                            LibraryTabId.LIKED -> favoritePagingItems.itemSnapshotList.items
-                                            LibraryTabId.FOLDERS -> {
-                                                // If we are deep in a folder, select songs of that folder.
-                                                // If we are at root, there are no songs to select.
-                                                playerViewModel.playerUiState.value.currentFolder?.songs ?: emptyList()
+                                // Check if PLAYLISTS is in selection mode
+                                if (currentTabId == LibraryTabId.PLAYLISTS && isPlaylistSelectionMode) {
+                                    // Playlist selection row
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp),
+                                        horizontalArrangement = Arrangement.Absolute.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Left side: Select All + Deselect
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            FilledTonalButton(
+                                                onClick = {
+                                                    playerViewModel.playlistSelectionStateHolder.selectAll(playlistUiState.playlists)
+                                                },
+                                                shape = AbsoluteSmoothCornerShape(
+                                                    cornerRadiusTL = 12.dp,
+                                                    cornerRadiusBL = 12.dp,
+                                                    cornerRadiusTR = 8.dp,
+                                                    cornerRadiusBR = 8.dp,
+                                                    smoothnessAsPercentTL = 60,
+                                                    smoothnessAsPercentBL = 60,
+                                                    smoothnessAsPercentTR = 60,
+                                                    smoothnessAsPercentBR = 60
+                                                ),
+                                                colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 14.dp),
+                                                modifier = Modifier.height(40.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.SelectAll,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "All",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = GoogleSansRounded
+                                                )
                                             }
-                                            // For SONGS and others fallback to all songs?
-                                            // Actually ALBUMS/ARTISTS don't show songs list directly, they show items.
-                                            // Selection mode is likely disabled there or not reachable.
-                                            // But for SONGS tab:
-                                            LibraryTabId.SONGS -> playerViewModel.allSongsFlow.value
-                                            else -> emptyList()
+
+                                            FilledTonalButton(
+                                                onClick = { playerViewModel.playlistSelectionStateHolder.clearSelection() },
+                                                shape = AbsoluteSmoothCornerShape(
+                                                    cornerRadiusTL = 8.dp,
+                                                    cornerRadiusBL = 8.dp,
+                                                    cornerRadiusTR = 12.dp,
+                                                    cornerRadiusBR = 12.dp,
+                                                    smoothnessAsPercentTL = 60,
+                                                    smoothnessAsPercentBL = 60,
+                                                    smoothnessAsPercentTR = 60,
+                                                    smoothnessAsPercentBR = 60
+                                                ),
+                                                colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.secondary,
+                                                    contentColor = MaterialTheme.colorScheme.onSecondary
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 14.dp),
+                                                modifier = Modifier.height(40.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Deselect,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "Deselect",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = GoogleSansRounded
+                                                )
+                                            }
                                         }
-                                        multiSelectionState.selectAll(songsToSelect)
-                                    },
-                                    onDeselect = { multiSelectionState.clearSelection() },
-                                    onOptionsClick = { showMultiSelectionSheet = true }
-                                )
+
+                                        // Right side: Options button
+                                        FilledTonalButton(
+                                            onClick = { showPlaylistMultiSelectionSheet = true },
+                                            shape = AbsoluteSmoothCornerShape(
+                                                cornerRadiusTL = 12.dp,
+                                                cornerRadiusBL = 12.dp,
+                                                cornerRadiusTR = 12.dp,
+                                                cornerRadiusBR = 12.dp,
+                                                smoothnessAsPercentTL = 60,
+                                                smoothnessAsPercentBL = 60,
+                                                smoothnessAsPercentTR = 60,
+                                                smoothnessAsPercentBR = 60
+                                            ),
+                                            colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            modifier = Modifier.height(40.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.MoreHoriz,
+                                                contentDescription = "More options",
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Options",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.Medium,
+                                                fontFamily = GoogleSansRounded
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // Song selection row
+                                    SelectionActionRow(
+                                        selectedCount = selectedSongs.size,
+                                        onSelectAll = {
+                                            val songsToSelect = when (tabTitles.getOrNull(currentTabIndex)?.toLibraryTabIdOrNull()) {
+                                                LibraryTabId.LIKED -> favoritePagingItems.itemSnapshotList.items
+                                                LibraryTabId.FOLDERS -> {
+                                                    // If we are deep in a folder, select songs of that folder.
+                                                    // If we are at root, there are no songs to select.
+                                                    playerViewModel.playerUiState.value.currentFolder?.songs ?: emptyList()
+                                                }
+                                                // For SONGS and others fallback to all songs?
+                                                // Actually ALBUMS/ARTISTS don't show songs list directly, they show items.
+                                                // Selection mode is likely disabled there or not reachable.
+                                                // But for SONGS tab:
+                                                LibraryTabId.SONGS -> playerViewModel.allSongsFlow.value
+                                                else -> emptyList()
+                                            }
+                                            multiSelectionState.selectAll(songsToSelect)
+                                        },
+                                        onDeselect = { multiSelectionState.clearSelection() },
+                                        onOptionsClick = { showMultiSelectionSheet = true }
+                                    )
+                                }
                             } else {
                                 LibraryActionRow(
                                     modifier = Modifier
@@ -966,7 +1118,13 @@ fun LibraryScreen(
                                             playerViewModel = playerViewModel,
                                             bottomBarHeight = bottomBarHeightDp,
                                             isRefreshing = isRefreshing,
-                                            onRefresh = onRefresh
+                                            onRefresh = onRefresh,
+                                            // Playlist multi-selection
+                                            isSelectionMode = isPlaylistSelectionMode,
+                                            selectedPlaylistIds = selectedPlaylistIds,
+                                            onPlaylistLongPress = onPlaylistLongPress,
+                                            onPlaylistSelectionToggle = onPlaylistSelectionToggle,
+                                            onPlaylistOptionsClick = { showPlaylistMultiSelectionSheet = true }
                                         )
                                     }
 
@@ -1339,6 +1497,41 @@ fun LibraryScreen(
         )
     }
 
+    // Playlist Multi-Selection Bottom Sheet
+    if (showPlaylistMultiSelectionSheet && selectedPlaylists.isNotEmpty()) {
+        val activity = context as? android.app.Activity
+
+        PlaylistMultiSelectionBottomSheet(
+            selectedPlaylists = selectedPlaylists,
+            onDismiss = {
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            },
+            onDeleteAll = {
+                playlistViewModel.deletePlaylistsInBatch(selectedPlaylistIds.toList())
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            },
+            onExportAll = {
+                playlistViewModel.exportPlaylistsAsM3u(selectedPlaylistIds.toList())
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            },
+            onMergeAll = {
+                pendingMergePlaylistIds = selectedPlaylistIds.toList()
+                showMergePlaylistDialog = true
+                showPlaylistMultiSelectionSheet = false
+            },
+            onShareAll = {
+                activity?.let {
+                    playlistViewModel.shareSelectedPlaylistsAsZip(selectedPlaylistIds.toList(), it)
+                }
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            }
+        )
+    }
+
     if (showTabSwitcherSheet) {
         LibraryTabSwitcherSheet(
             tabs = tabTitles,
@@ -1374,6 +1567,66 @@ fun LibraryScreen(
                 playerViewModel.resetLibraryTabsOrder()
             },
             onDismiss = { showReorderTabsSheet = false }
+        )
+    }
+
+    // Merge Playlists Dialog
+    if (showMergePlaylistDialog && pendingMergePlaylistIds.isNotEmpty()) {
+        var mergePlaylistName by remember { mutableStateOf("") }
+        
+        AlertDialog(
+            onDismissRequest = { 
+                showMergePlaylistDialog = false
+                pendingMergePlaylistIds = emptyList()
+                mergePlaylistName = ""
+            },
+            title = { Text("Merge Playlists") },
+            text = {
+                Column {
+                    Text("Enter a name for the merged playlist:")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = mergePlaylistName,
+                        onValueChange = { mergePlaylistName = it },
+                        placeholder = { Text("Merged Playlist") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "This will merge ${pendingMergePlaylistIds.size} selected playlists into one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (mergePlaylistName.isNotEmpty()) {
+                            playlistViewModel.mergePlaylistsIntoOne(
+                                pendingMergePlaylistIds,
+                                mergePlaylistName
+                            )
+                            playlistMultiSelectionState.clearSelection()
+                            showMergePlaylistDialog = false
+                            pendingMergePlaylistIds = emptyList()
+                            mergePlaylistName = ""
+                        }
+                    }
+                ) {
+                    Text("Merge")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showMergePlaylistDialog = false
+                    pendingMergePlaylistIds = emptyList()
+                    mergePlaylistName = ""
+                }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }
@@ -3076,7 +3329,13 @@ fun LibraryPlaylistsTab(
     playerViewModel: PlayerViewModel,
     bottomBarHeight: Dp,
     isRefreshing: Boolean,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    // Playlist multi-selection parameters
+    isSelectionMode: Boolean = false,
+    selectedPlaylistIds: Set<String> = emptySet(),
+    onPlaylistLongPress: (com.theveloper.pixelplay.data.model.Playlist) -> Unit = {},
+    onPlaylistSelectionToggle: (com.theveloper.pixelplay.data.model.Playlist) -> Unit = {},
+    onPlaylistOptionsClick: () -> Unit = {}
 ) {
     PlaylistContainer(
         playlistUiState = playlistUiState,
@@ -3085,6 +3344,11 @@ fun LibraryPlaylistsTab(
         bottomBarHeight = bottomBarHeight,
         navController = navController,
         playerViewModel = playerViewModel,
+        // Playlist multi-selection parameters
+        isSelectionMode = isSelectionMode,
+        selectedPlaylistIds = selectedPlaylistIds,
+        onPlaylistLongPress = onPlaylistLongPress,
+        onPlaylistSelectionToggle = onPlaylistSelectionToggle
     )
 }
 
