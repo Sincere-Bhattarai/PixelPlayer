@@ -72,6 +72,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -136,6 +137,7 @@ import com.theveloper.pixelplay.presentation.components.CreateAiPlaylistDialog
 import com.theveloper.pixelplay.presentation.components.subcomps.SelectionActionRow
 import com.theveloper.pixelplay.presentation.components.subcomps.SelectionCountPill
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
+import com.theveloper.pixelplay.presentation.viewmodel.PlayerUiState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
@@ -181,6 +183,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -217,6 +220,47 @@ val ListExtraBottomGap = 30.dp
 val PlayerSheetCollapsedCornerRadius = 32.dp
 private const val ENABLE_FOLDERS_SOURCE_TOGGLE = false
 private const val ENABLE_FOLDERS_STORAGE_FILTER = false
+
+private data class LibraryScreenPlayerProjection(
+    val currentFolder: MusicFolder? = null,
+    val folderSourceRootPath: String = "",
+    val folderSource: FolderSource = FolderSource.INTERNAL,
+    val isFoldersPlaylistView: Boolean = false,
+    val currentStorageFilter: StorageFilter = StorageFilter.ALL,
+    val currentSongSortOption: SortOption = SortOption.SongTitleAZ,
+    val currentAlbumSortOption: SortOption = SortOption.AlbumTitleAZ,
+    val currentArtistSortOption: SortOption = SortOption.ArtistNameAZ,
+    val currentFavoriteSortOption: SortOption = SortOption.LikedSongDateLiked,
+    val currentFolderSortOption: SortOption = SortOption.FolderNameAZ,
+    val isAlbumsListView: Boolean = false,
+    val isSdCardAvailable: Boolean = false,
+    val musicFolders: ImmutableList<MusicFolder> = persistentListOf(),
+    val isLoadingLibraryCategories: Boolean = true,
+    val isGeneratingAiMetadata: Boolean = false,
+    val isSyncingLibrary: Boolean = false,
+    val isLoadingInitialSongs: Boolean = true
+)
+
+private fun PlayerUiState.toLibraryScreenProjection(): LibraryScreenPlayerProjection =
+    LibraryScreenPlayerProjection(
+        currentFolder = currentFolder,
+        folderSourceRootPath = folderSourceRootPath,
+        folderSource = folderSource,
+        isFoldersPlaylistView = isFoldersPlaylistView,
+        currentStorageFilter = currentStorageFilter,
+        currentSongSortOption = currentSongSortOption,
+        currentAlbumSortOption = currentAlbumSortOption,
+        currentArtistSortOption = currentArtistSortOption,
+        currentFavoriteSortOption = currentFavoriteSortOption,
+        currentFolderSortOption = currentFolderSortOption,
+        isAlbumsListView = isAlbumsListView,
+        isSdCardAvailable = isSdCardAvailable,
+        musicFolders = musicFolders,
+        isLoadingLibraryCategories = isLoadingLibraryCategories,
+        isGeneratingAiMetadata = isGeneratingAiMetadata,
+        isSyncingLibrary = isSyncingLibrary,
+        isLoadingInitialSongs = isLoadingInitialSongs
+    )
 
 @RequiresApi(Build.VERSION_CODES.R)
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -266,10 +310,11 @@ fun LibraryScreen(
         }
     }
     val isSortSheetVisible by playerViewModel.isSortingSheetVisible.collectAsStateWithLifecycle()
-    val libraryUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
-    val albums by playerViewModel.albumsFlow.collectAsStateWithLifecycle()
-    val artists by playerViewModel.artistsFlow.collectAsStateWithLifecycle()
-    val allSongs by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
+    val canNavigateBackInFolders by remember(playerViewModel) {
+        playerViewModel.playerUiState
+            .map { uiState -> uiState.currentFolder != null && uiState.folderBackGestureNavigationEnabled }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
     val hasGeminiApiKey by playerViewModel.hasGeminiApiKey.collectAsStateWithLifecycle()
     val isGeneratingAiPlaylist by playerViewModel.isGeneratingAiPlaylist.collectAsStateWithLifecycle()
     val aiError by playerViewModel.aiError.collectAsStateWithLifecycle()
@@ -372,8 +417,7 @@ fun LibraryScreen(
     BackHandler(
         enabled =
             currentTabId == LibraryTabId.FOLDERS &&
-                    libraryUiState.folderBackGestureNavigationEnabled &&
-                    libraryUiState.currentFolder != null &&
+                    canNavigateBackInFolders &&
                     !isSortSheetVisible
     ) {
         playerViewModel.navigateBackFolder()
@@ -541,6 +585,21 @@ fun LibraryScreen(
             )
         }
     ) { innerScaffoldPadding ->
+        val playerUiState by remember(playerViewModel) {
+            playerViewModel.playerUiState
+                .map { uiState -> uiState.toLibraryScreenProjection() }
+                .distinctUntilChanged()
+        }.collectAsStateWithLifecycle(initialValue = LibraryScreenPlayerProjection())
+        val isLibraryContentEmpty by remember(playerViewModel) {
+            combine(
+                playerViewModel.allSongsFlow,
+                playerViewModel.albumsFlow,
+                playerViewModel.artistsFlow
+            ) { allSongs, albums, artists ->
+                allSongs.isEmpty() && albums.isEmpty() && artists.isEmpty()
+            }.distinctUntilChanged()
+        }.collectAsStateWithLifecycle(initialValue = true)
+
         Box( // Box para permitir superposición del indicador de carga
             modifier = Modifier
                 .padding(top = innerScaffoldPadding.calculateTopPadding())
@@ -655,7 +714,6 @@ fun LibraryScreen(
                             distinctByKey.ifEmpty { listOf(currentTabId.defaultSort) }
                         }
 
-                        val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
                         val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
                         val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
                         val isPlaylistSelectionMode by playlistMultiSelectionState.isSelectionMode.collectAsState()
@@ -696,9 +754,6 @@ fun LibraryScreen(
                                 }
                             }
                         }
-
-                        //val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
-                        //val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
 
                         // Switch between normal action row and selection action row
                         AnimatedContent(
@@ -1042,8 +1097,6 @@ fun LibraryScreen(
                                         val allSongsLazyPagingItems = libraryViewModel.songsPagingFlow.collectAsLazyPagingItems()
                                         // We can use libraryViewModel.isLoadingLibrary or similar if needed for global loading state
                                         val isLibraryLoading by libraryViewModel.isLoadingLibrary.collectAsStateWithLifecycle()
-                                        val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
-                                        val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
 
                                         LibrarySongsTab(
                                             songs = allSongsLazyPagingItems,
@@ -1069,7 +1122,7 @@ fun LibraryScreen(
                                     }
                                     LibraryTabId.ALBUMS -> {
                                         val albums by playerViewModel.albumsFlow.collectAsStateWithLifecycle()
-                                        val isLoading = libraryUiState.isLoadingLibraryCategories
+                                        val isLoading = playerUiState.isLoadingLibraryCategories
 
                                         val stableOnAlbumClick: (Long) -> Unit = remember(navController) {
                                             { albumId: Long ->
@@ -1084,13 +1137,13 @@ fun LibraryScreen(
                                             onAlbumClick = stableOnAlbumClick,
                                             isRefreshing = isRefreshing,
                                             onRefresh = onRefresh,
-                                            storageFilter = libraryUiState.currentStorageFilter
+                                            storageFilter = playerUiState.currentStorageFilter
                                         )
                                     }
 
                                     LibraryTabId.ARTISTS -> {
                                         val artists by playerViewModel.artistsFlow.collectAsStateWithLifecycle()
-                                        val isLoading = libraryUiState.isLoadingLibraryCategories
+                                        val isLoading = playerUiState.isLoadingLibraryCategories
 
                                         LibraryArtistsTab(
                                             artists = artists,
@@ -1106,7 +1159,7 @@ fun LibraryScreen(
                                             },
                                             isRefreshing = isRefreshing,
                                             onRefresh = onRefresh,
-                                            storageFilter = libraryUiState.currentStorageFilter
+                                            storageFilter = playerUiState.currentStorageFilter
                                         )
                                     }
 
@@ -1146,7 +1199,7 @@ fun LibraryScreen(
                                             getSelectionIndex = playerViewModel.multiSelectionStateHolder::getSelectionIndex,
                                             onLocateCurrentSongVisibilityChanged = { likedShowLocateButton = it },
                                             onRegisterLocateCurrentSongAction = { likedLocateAction = it },
-                                            storageFilter = libraryUiState.currentStorageFilter
+                                            storageFilter = playerUiState.currentStorageFilter
                                         )
                                     }
 
@@ -1160,11 +1213,9 @@ fun LibraryScreen(
                                         }
 
                                         if (hasPermission) {
-                                            val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
                                             val folders = playerUiState.musicFolders
                                             val currentFolder = playerUiState.currentFolder
                                             val isLoading = playerUiState.isLoadingLibraryCategories
-                                            val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
 
                                             LibraryFoldersTab(
                                                 folders = folders,
@@ -1233,8 +1284,7 @@ fun LibraryScreen(
                         }
                     }
                 }
-                val globalLoadingState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
-                if (globalLoadingState.isGeneratingAiMetadata) {
+                if (playerUiState.isGeneratingAiMetadata) {
                     Surface( // Fondo semitransparente para el indicador
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f)
@@ -1251,7 +1301,13 @@ fun LibraryScreen(
                             }
                         }
                     }
-                } else if (globalLoadingState.isSyncingLibrary || ((globalLoadingState.isLoadingInitialSongs || globalLoadingState.isLoadingLibraryCategories) && (allSongs.isEmpty() && albums.isEmpty() && artists.isEmpty()))) {
+                } else if (
+                    playerUiState.isSyncingLibrary ||
+                    (
+                        (playerUiState.isLoadingInitialSongs || playerUiState.isLoadingLibraryCategories) &&
+                            isLibraryContentEmpty
+                        )
+                ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f)
@@ -1328,9 +1384,10 @@ fun LibraryScreen(
         }
     )
 
+    val allSongsForPlaylistDialog by playerViewModel.allSongsFlow.collectAsStateWithLifecycle()
     CreatePlaylistDialog(
         visible = showCreatePlaylistDialog,
-        allSongs = allSongs,
+        allSongs = allSongsForPlaylistDialog,
         onDismiss = { showCreatePlaylistDialog = false },
         onGenerateClick = {
             showCreatePlaylistDialog = false
