@@ -105,6 +105,7 @@ import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.preferences.AlbumArtQuality
 import com.theveloper.pixelplay.data.preferences.CarouselStyle
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
 import com.theveloper.pixelplay.presentation.components.AlbumCarouselSection
@@ -226,10 +227,6 @@ fun FullPlayerContent(
     // OPTIMIZATION: Use passed provider instead of collecting flow
     val totalDurationValue = totalDurationProvider()
 
-    val stableControlAnimationSpec = remember {
-        tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing)
-    }
-
     val playerOnBaseColor = LocalMaterialTheme.current.onPrimaryContainer
     val playerAccentColor = LocalMaterialTheme.current.primary
     val playerOnAccentColor = LocalMaterialTheme.current.onPrimary
@@ -312,316 +309,136 @@ fun FullPlayerContent(
         }
     }
 
-    // Sub sections , to be reused in different layout modes
-
-    @SuppressLint("UnusedBoxWithConstraintsScope")
-    @Composable
-    fun AlbumCoverSection(modifier: Modifier = Modifier) {
-        val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delayAlbumCarousel
-        val shouldApplyPausedScale = !isPlayingProvider() && !playWhenReadyProvider()
-        val albumArtScale by animateFloatAsState(
-            targetValue = if (shouldApplyPausedScale) 0.95f else 1f,
-            animationSpec = spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessLow
-            ),
-            label = "AlbumArtScale"
+    val onAlbumSongSelected: (Song) -> Unit = { newSong ->
+        playerViewModel.showAndPlaySong(
+            song = newSong,
+            contextSongs = currentPlaybackQueue,
+            queueName = currentQueueSourceName
         )
+    }
 
-        BoxWithConstraints(
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp)
-        ) {
-            val carouselHeight = when (carouselStyle) {
-                CarouselStyle.NO_PEEK -> maxWidth
-                CarouselStyle.ONE_PEEK -> maxWidth * 0.8f
-                CarouselStyle.TWO_PEEK -> maxWidth * 0.6f
-                else -> maxWidth * 0.8f
-            }
+    val onSongMetadataQueueClick = {
+        showSongInfoBottomSheet = true
+        onShowQueueClicked()
+    }
 
-            DelayedContent(
-                shouldDelay = shouldDelay,
-                showPlaceholders = loadingTweaks.showPlaceholders,
-                applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
-                switchOnDragRelease = loadingTweaks.switchOnDragRelease,
-                isSheetDragGestureActive = isSheetDragGestureActive,
-                sharedBoundsModifier = Modifier.fillMaxWidth().height(carouselHeight),
-                expansionFractionProvider = expansionFractionProvider,
-                isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
-                normalStartThreshold = 0.08f,
-                delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
-                delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
-                placeholder = {
-                    if (loadingTweaks.transparentPlaceholders) {
-                        Box(
-                            Modifier
-                                .height(carouselHeight)
-                                .fillMaxWidth()
-                                .graphicsLayer {
-                                    scaleX = albumArtScale
-                                    scaleY = albumArtScale
-                                }
-                        )
-                    } else {
-                        AlbumPlaceholder(
-                            height = carouselHeight,
-                            color = placeholderColor,
-                            onColor = placeholderOnColor,
-                            modifier = Modifier.graphicsLayer {
-                                scaleX = albumArtScale
-                                scaleY = albumArtScale
-                            }
-                        )
-                    }
-                }
-            ) {
-                 AlbumCarouselSection(
-                    currentSong = song,
-                    queue = currentPlaybackQueue,
-                    expansionFraction = 1f, // Static layout
-                    onSongSelected = { newSong ->
-                        if (newSong.id != song.id) {
-                            playerViewModel.showAndPlaySong(
-                                song = newSong,
-                                contextSongs = currentPlaybackQueue,
-                                queueName = currentQueueSourceName
-                            )
-                        }
-                    },
-                    carouselStyle = carouselStyle,
-                    modifier = Modifier
-                        .height(carouselHeight)
-                        .graphicsLayer {
-                            scaleX = albumArtScale
-                            scaleY = albumArtScale
-                        },
-                    albumArtQuality = albumArtQuality
-                )
-            }
+    val onSongMetadataArtistClick = {
+        val resolvedArtistId = currentSongArtists.firstOrNull()?.id ?: song.artistId
+        if (currentSongArtists.size > 1) {
+            showArtistPicker = true
+        } else {
+            playerViewModel.triggerArtistNavigationFromPlayer(resolvedArtistId)
         }
     }
 
-    @Composable
-    fun ControlsSection() {
-        val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delayControls
-
-        DelayedContent(
-            shouldDelay = shouldDelay,
-            showPlaceholders = loadingTweaks.showPlaceholders,
-            applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
-            switchOnDragRelease = loadingTweaks.switchOnDragRelease,
+    val albumCoverSection: @Composable (Modifier) -> Unit = { modifier ->
+        FullPlayerAlbumCoverSection(
+            song = song,
+            currentPlaybackQueue = currentPlaybackQueue,
+            carouselStyle = carouselStyle,
+            loadingTweaks = loadingTweaks,
             isSheetDragGestureActive = isSheetDragGestureActive,
-            sharedBoundsModifier = Modifier.fillMaxWidth().height(182.dp),
             expansionFractionProvider = expansionFractionProvider,
-            isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
-            normalStartThreshold = 0.42f,
-            delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
-            delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
-            placeholder = {
-                if (loadingTweaks.transparentPlaceholders) {
-                    Box(Modifier.fillMaxWidth().height(182.dp))
-                } else {
-                    ControlsPlaceholder(placeholderColor, placeholderOnColor)
-                }
-            }
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                AnimatedPlaybackControls(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    isPlayingProvider = isPlayingProvider,
-                    onPrevious = onPrevious,
-                    onPlayPause = onPlayPause,
-                    onNext = onNext,
-                    height = 80.dp,
-                    pressAnimationSpec = stableControlAnimationSpec,
-                    releaseDelay = 220L,
-                    colorOtherButtons = playerSecondaryAccentColor,
-                    colorPlayPause = playerAccentColor,
-                    tintPlayPauseIcon = playerOnAccentColor,
-                    tintOtherIcons = controlTintOtherIcons,
-                    colorPreviousButton = playerOnAccentColor,
-                    colorNextButton = playerOnAccentColor,
-                    tintPreviousIcon = playerAccentColor,
-                    tintNextIcon = playerAccentColor
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                BottomToggleRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 66.dp, max = 86.dp)
-                        .padding(horizontal = 26.dp, vertical = 0.dp)
-                        .padding(bottom = 6.dp),
-                    isShuffleEnabled = isShuffleEnabledProvider(),
-                    repeatMode = repeatModeProvider(),
-                    isFavoriteProvider = isFavoriteProvider,
-                    onShuffleToggle = onShuffleToggle,
-                    onRepeatToggle = onRepeatToggle,
-                    onFavoriteToggle = onFavoriteToggle
-                )
-            }
-        }
+            currentSheetState = currentSheetState,
+            isPlayingProvider = isPlayingProvider,
+            playWhenReadyProvider = playWhenReadyProvider,
+            placeholderColor = placeholderColor,
+            placeholderOnColor = placeholderOnColor,
+            albumArtQuality = albumArtQuality,
+            onSongSelected = onAlbumSongSelected,
+            modifier = modifier
+        )
     }
 
-    @Composable
-    fun PlayerProgressSection() {
-        val isMetadataForCurrentSong = playbackAudioMetadata.mediaId == song.id
-        PlayerProgressBarSection(
-            songId = song.id,
+    val playerProgressSection: @Composable () -> Unit = {
+        FullPlayerProgressSection(
+            song = song,
+            playbackMetadataMediaId = playbackAudioMetadata.mediaId,
+            playbackMetadataMimeType = playbackAudioMetadata.mimeType,
+            playbackMetadataBitrate = playbackAudioMetadata.bitrate,
+            playbackMetadataSampleRate = playbackAudioMetadata.sampleRate,
             currentPositionProvider = currentPositionProvider,
             totalDurationValue = totalDurationValue,
-            songDurationHintMs = song.duration,
-            audioMimeType = if (isMetadataForCurrentSong) playbackAudioMetadata.mimeType else null,
-            audioBitrate = if (isMetadataForCurrentSong) playbackAudioMetadata.bitrate else null,
-            audioSampleRate = if (isMetadataForCurrentSong) playbackAudioMetadata.sampleRate else null,
-            showAudioFileInfo = showPlayerFileInfo,
+            showPlayerFileInfo = showPlayerFileInfo,
             onSeek = onSeek,
             expansionFractionProvider = expansionFractionProvider,
             isPlayingProvider = isPlayingProvider,
             currentSheetState = currentSheetState,
-            activeTrackColor = playerAccentColor,
-            inactiveTrackColor = playerOnBaseColor.copy(alpha = 0.2f),
-            thumbColor = playerAccentColor,
-            timeTextColor = playerOnBaseColor,
+            playerAccentColor = playerAccentColor,
+            playerOnBaseColor = playerOnBaseColor,
             allowRealtimeUpdates = allowRealtimeUpdates,
             isSheetDragGestureActive = isSheetDragGestureActive,
             loadingTweaks = loadingTweaks
         )
     }
 
-    @Composable
-    fun SongMetadataSection() {
-        val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delaySongMetadata
-
-        DelayedContent(
-            shouldDelay = shouldDelay,
-            showPlaceholders = loadingTweaks.showPlaceholders,
-            applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
-            switchOnDragRelease = loadingTweaks.switchOnDragRelease,
+    val controlsSection: @Composable () -> Unit = {
+        FullPlayerControlsSection(
+            loadingTweaks = loadingTweaks,
             isSheetDragGestureActive = isSheetDragGestureActive,
-            sharedBoundsModifier = Modifier.fillMaxWidth().heightIn(min = 70.dp),
             expansionFractionProvider = expansionFractionProvider,
-            isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
-            normalStartThreshold = 0.20f,
-            delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
-            delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
-            placeholder = {
-                if (loadingTweaks.transparentPlaceholders) {
-                    Box(Modifier.fillMaxWidth().height(70.dp))
-                } else {
-                    MetadataPlaceholder(
-                        expansionFraction = expansionFractionProvider(),
-                        color = placeholderColor,
-                        onColor = placeholderOnColor,
-                        showQueueButtons = isLandscape
-                    )
-                }
-            }
-        ) {
-            SongMetadataDisplaySection(
-                modifier = Modifier
-                    .padding(start = 0.dp),
-                onClickLyrics = onLyricsClick,
-                song = song,
-                currentSongArtists = currentSongArtists,
-                expansionFractionProvider = expansionFractionProvider,
-                textColor = playerOnBaseColor,
-                artistTextColor = playerOnBaseColor.copy(alpha = 0.7f),
-                playerViewModel = playerViewModel,
-                gradientEdgeColor = LocalMaterialTheme.current.primaryContainer,
-                chipColor = playerOnAccentColor.copy(alpha = 0.8f),
-                chipContentColor = playerAccentColor,
-                showQueueButton = isLandscape,
-                onClickQueue = {
-                    showSongInfoBottomSheet = true
-                    onShowQueueClicked()
-                },
-                onClickArtist = {
-                    val resolvedArtistId = currentSongArtists.firstOrNull()?.id ?: song.artistId
-                    if (currentSongArtists.size > 1) {
-                        showArtistPicker = true
-                    } else {
-                        playerViewModel.triggerArtistNavigationFromPlayer(resolvedArtistId)
-                    }
-                }
-            )
-        }
+            currentSheetState = currentSheetState,
+            placeholderColor = placeholderColor,
+            placeholderOnColor = placeholderOnColor,
+            isPlayingProvider = isPlayingProvider,
+            onPrevious = onPrevious,
+            onPlayPause = onPlayPause,
+            onNext = onNext,
+            playerSecondaryAccentColor = playerSecondaryAccentColor,
+            playerAccentColor = playerAccentColor,
+            playerOnAccentColor = playerOnAccentColor,
+            controlTintOtherIcons = controlTintOtherIcons,
+            isShuffleEnabledProvider = isShuffleEnabledProvider,
+            repeatModeProvider = repeatModeProvider,
+            isFavoriteProvider = isFavoriteProvider,
+            onShuffleToggle = onShuffleToggle,
+            onRepeatToggle = onRepeatToggle,
+            onFavoriteToggle = onFavoriteToggle
+        )
     }
 
-    @Composable
-    fun FullPlayerPortraitContent(paddingValues: PaddingValues) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(
-                    horizontal = 24.dp,
-                    vertical = 0.dp
-                ),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceAround
-        ) {
-            // Removed PrefetchAlbumNeighborsImg DeferAt wrapper - implicitly prefetching if composed?
-            // Actually Prefetch likely needs to be kept but maybe without DeferAt if it's lightweight
-            // For now, let's keep it simple.
-
-            AlbumCoverSection()
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Box(Modifier.align(Alignment.Start)) {
-                    SongMetadataSection()
-                }
-                PlayerProgressSection()
-            }
-
-            ControlsSection()
-        }
+    val portraitSongMetadataSection: @Composable () -> Unit = {
+        FullPlayerSongMetadataSection(
+            song = song,
+            currentSongArtists = currentSongArtists,
+            loadingTweaks = loadingTweaks,
+            isSheetDragGestureActive = isSheetDragGestureActive,
+            expansionFractionProvider = expansionFractionProvider,
+            currentSheetState = currentSheetState,
+            placeholderColor = placeholderColor,
+            placeholderOnColor = placeholderOnColor,
+            isLandscape = false,
+            onLyricsClick = onLyricsClick,
+            playerOnBaseColor = playerOnBaseColor,
+            playerViewModel = playerViewModel,
+            gradientEdgeColor = LocalMaterialTheme.current.primaryContainer,
+            chipColor = playerOnAccentColor.copy(alpha = 0.8f),
+            chipContentColor = playerAccentColor,
+            onQueueClick = onSongMetadataQueueClick,
+            onArtistClick = onSongMetadataArtistClick
+        )
     }
 
-    @Composable
-    fun FullPlayerLandscapeContent(paddingValues: PaddingValues) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(
-                    horizontal = 24.dp,
-                    vertical = 0.dp
-                ),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AlbumCoverSection(
-                Modifier
-                    .fillMaxHeight()
-                    .weight(1f)
-            )
-            Spacer(Modifier.width(9.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .weight(1f)
-                    .padding(
-                        horizontal = 0.dp,
-                        vertical = 0.dp
-                    ),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceEvenly
-            ) {
-                SongMetadataSection()
-
-                PlayerProgressSection()
-
-                ControlsSection()
-            }
-        }
+    val landscapeSongMetadataSection: @Composable () -> Unit = {
+        FullPlayerSongMetadataSection(
+            song = song,
+            currentSongArtists = currentSongArtists,
+            loadingTweaks = loadingTweaks,
+            isSheetDragGestureActive = isSheetDragGestureActive,
+            expansionFractionProvider = expansionFractionProvider,
+            currentSheetState = currentSheetState,
+            placeholderColor = placeholderColor,
+            placeholderOnColor = placeholderOnColor,
+            isLandscape = true,
+            onLyricsClick = onLyricsClick,
+            playerOnBaseColor = playerOnBaseColor,
+            playerViewModel = playerViewModel,
+            gradientEdgeColor = LocalMaterialTheme.current.primaryContainer,
+            chipColor = playerOnAccentColor.copy(alpha = 0.8f),
+            chipContentColor = playerAccentColor,
+            onQueueClick = onSongMetadataQueueClick,
+            onArtistClick = onSongMetadataArtistClick
+        )
     }
 
     Scaffold(
@@ -899,9 +716,21 @@ fun FullPlayerContent(
         }
     ) { paddingValues ->
         if (isLandscape) {
-            FullPlayerLandscapeContent(paddingValues)
+            FullPlayerLandscapeContent(
+                paddingValues = paddingValues,
+                albumCoverSection = albumCoverSection,
+                songMetadataSection = landscapeSongMetadataSection,
+                playerProgressSection = playerProgressSection,
+                controlsSection = controlsSection
+            )
         } else {
-            FullPlayerPortraitContent(paddingValues)
+            FullPlayerPortraitContent(
+                paddingValues = paddingValues,
+                albumCoverSection = albumCoverSection,
+                songMetadataSection = portraitSongMetadataSection,
+                playerProgressSection = playerProgressSection,
+                controlsSection = controlsSection
+            )
         }
     }
     AnimatedVisibility(
@@ -993,6 +822,383 @@ fun FullPlayerContent(
     }
 }
 
+
+@SuppressLint("UnusedBoxWithConstraintsScope")
+@Composable
+private fun FullPlayerAlbumCoverSection(
+    song: Song,
+    currentPlaybackQueue: ImmutableList<Song>,
+    carouselStyle: String,
+    loadingTweaks: FullPlayerLoadingTweaks,
+    isSheetDragGestureActive: Boolean,
+    expansionFractionProvider: () -> Float,
+    currentSheetState: PlayerSheetState,
+    isPlayingProvider: () -> Boolean,
+    playWhenReadyProvider: () -> Boolean,
+    placeholderColor: Color,
+    placeholderOnColor: Color,
+    albumArtQuality: AlbumArtQuality,
+    onSongSelected: (Song) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delayAlbumCarousel
+    val shouldApplyPausedScale = !isPlayingProvider() && !playWhenReadyProvider()
+    val albumArtScale by animateFloatAsState(
+        targetValue = if (shouldApplyPausedScale) 0.95f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "AlbumArtScale"
+    )
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        val carouselHeight = when (carouselStyle) {
+            CarouselStyle.NO_PEEK -> maxWidth
+            CarouselStyle.ONE_PEEK -> maxWidth * 0.8f
+            CarouselStyle.TWO_PEEK -> maxWidth * 0.6f
+            else -> maxWidth * 0.8f
+        }
+
+        DelayedContent(
+            shouldDelay = shouldDelay,
+            showPlaceholders = loadingTweaks.showPlaceholders,
+            applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
+            switchOnDragRelease = loadingTweaks.switchOnDragRelease,
+            isSheetDragGestureActive = isSheetDragGestureActive,
+            sharedBoundsModifier = Modifier.fillMaxWidth().height(carouselHeight),
+            expansionFractionProvider = expansionFractionProvider,
+            isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
+            normalStartThreshold = 0.08f,
+            delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
+            delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
+            placeholder = {
+                if (loadingTweaks.transparentPlaceholders) {
+                    Box(
+                        Modifier
+                            .height(carouselHeight)
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                scaleX = albumArtScale
+                                scaleY = albumArtScale
+                            }
+                    )
+                } else {
+                    AlbumPlaceholder(
+                        height = carouselHeight,
+                        color = placeholderColor,
+                        onColor = placeholderOnColor,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = albumArtScale
+                            scaleY = albumArtScale
+                        }
+                    )
+                }
+            }
+        ) {
+            AlbumCarouselSection(
+                currentSong = song,
+                queue = currentPlaybackQueue,
+                expansionFraction = 1f,
+                onSongSelected = { newSong ->
+                    if (newSong.id != song.id) {
+                        onSongSelected(newSong)
+                    }
+                },
+                carouselStyle = carouselStyle,
+                modifier = Modifier
+                    .height(carouselHeight)
+                    .graphicsLayer {
+                        scaleX = albumArtScale
+                        scaleY = albumArtScale
+                    },
+                albumArtQuality = albumArtQuality
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullPlayerControlsSection(
+    loadingTweaks: FullPlayerLoadingTweaks,
+    isSheetDragGestureActive: Boolean,
+    expansionFractionProvider: () -> Float,
+    currentSheetState: PlayerSheetState,
+    placeholderColor: Color,
+    placeholderOnColor: Color,
+    isPlayingProvider: () -> Boolean,
+    onPrevious: () -> Unit,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    playerSecondaryAccentColor: Color,
+    playerAccentColor: Color,
+    playerOnAccentColor: Color,
+    controlTintOtherIcons: Color,
+    isShuffleEnabledProvider: () -> Boolean,
+    repeatModeProvider: () -> Int,
+    isFavoriteProvider: () -> Boolean,
+    onShuffleToggle: () -> Unit,
+    onRepeatToggle: () -> Unit,
+    onFavoriteToggle: () -> Unit
+) {
+    val stableControlAnimationSpec = remember {
+        tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing)
+    }
+    val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delayControls
+
+    DelayedContent(
+        shouldDelay = shouldDelay,
+        showPlaceholders = loadingTweaks.showPlaceholders,
+        applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
+        switchOnDragRelease = loadingTweaks.switchOnDragRelease,
+        isSheetDragGestureActive = isSheetDragGestureActive,
+        sharedBoundsModifier = Modifier.fillMaxWidth().height(182.dp),
+        expansionFractionProvider = expansionFractionProvider,
+        isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
+        normalStartThreshold = 0.42f,
+        delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
+        delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
+        placeholder = {
+            if (loadingTweaks.transparentPlaceholders) {
+                Box(Modifier.fillMaxWidth().height(182.dp))
+            } else {
+                ControlsPlaceholder(placeholderColor, placeholderOnColor)
+            }
+        }
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            AnimatedPlaybackControls(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                isPlayingProvider = isPlayingProvider,
+                onPrevious = onPrevious,
+                onPlayPause = onPlayPause,
+                onNext = onNext,
+                height = 80.dp,
+                pressAnimationSpec = stableControlAnimationSpec,
+                releaseDelay = 220L,
+                colorOtherButtons = playerSecondaryAccentColor,
+                colorPlayPause = playerAccentColor,
+                tintPlayPauseIcon = playerOnAccentColor,
+                tintOtherIcons = controlTintOtherIcons,
+                colorPreviousButton = playerOnAccentColor,
+                colorNextButton = playerOnAccentColor,
+                tintPreviousIcon = playerAccentColor,
+                tintNextIcon = playerAccentColor
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            BottomToggleRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 66.dp, max = 86.dp)
+                    .padding(horizontal = 26.dp, vertical = 0.dp)
+                    .padding(bottom = 6.dp),
+                isShuffleEnabled = isShuffleEnabledProvider(),
+                repeatMode = repeatModeProvider(),
+                isFavoriteProvider = isFavoriteProvider,
+                onShuffleToggle = onShuffleToggle,
+                onRepeatToggle = onRepeatToggle,
+                onFavoriteToggle = onFavoriteToggle
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullPlayerProgressSection(
+    song: Song,
+    playbackMetadataMediaId: String?,
+    playbackMetadataMimeType: String?,
+    playbackMetadataBitrate: Int?,
+    playbackMetadataSampleRate: Int?,
+    currentPositionProvider: () -> Long,
+    totalDurationValue: Long,
+    showPlayerFileInfo: Boolean,
+    onSeek: (Long) -> Unit,
+    expansionFractionProvider: () -> Float,
+    isPlayingProvider: () -> Boolean,
+    currentSheetState: PlayerSheetState,
+    playerAccentColor: Color,
+    playerOnBaseColor: Color,
+    allowRealtimeUpdates: Boolean,
+    isSheetDragGestureActive: Boolean,
+    loadingTweaks: FullPlayerLoadingTweaks
+) {
+    val isMetadataForCurrentSong = playbackMetadataMediaId == song.id
+    PlayerProgressBarSection(
+        songId = song.id,
+        currentPositionProvider = currentPositionProvider,
+        totalDurationValue = totalDurationValue,
+        songDurationHintMs = song.duration,
+        audioMimeType = if (isMetadataForCurrentSong) playbackMetadataMimeType else null,
+        audioBitrate = if (isMetadataForCurrentSong) playbackMetadataBitrate else null,
+        audioSampleRate = if (isMetadataForCurrentSong) playbackMetadataSampleRate else null,
+        showAudioFileInfo = showPlayerFileInfo,
+        onSeek = onSeek,
+        expansionFractionProvider = expansionFractionProvider,
+        isPlayingProvider = isPlayingProvider,
+        currentSheetState = currentSheetState,
+        activeTrackColor = playerAccentColor,
+        inactiveTrackColor = playerOnBaseColor.copy(alpha = 0.2f),
+        thumbColor = playerAccentColor,
+        timeTextColor = playerOnBaseColor,
+        allowRealtimeUpdates = allowRealtimeUpdates,
+        isSheetDragGestureActive = isSheetDragGestureActive,
+        loadingTweaks = loadingTweaks
+    )
+}
+
+@Composable
+private fun FullPlayerSongMetadataSection(
+    song: Song,
+    currentSongArtists: List<Artist>,
+    loadingTweaks: FullPlayerLoadingTweaks,
+    isSheetDragGestureActive: Boolean,
+    expansionFractionProvider: () -> Float,
+    currentSheetState: PlayerSheetState,
+    placeholderColor: Color,
+    placeholderOnColor: Color,
+    isLandscape: Boolean,
+    onLyricsClick: () -> Unit,
+    playerOnBaseColor: Color,
+    playerViewModel: PlayerViewModel,
+    gradientEdgeColor: Color,
+    chipColor: Color,
+    chipContentColor: Color,
+    onQueueClick: () -> Unit,
+    onArtistClick: () -> Unit
+) {
+    val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delaySongMetadata
+
+    DelayedContent(
+        shouldDelay = shouldDelay,
+        showPlaceholders = loadingTweaks.showPlaceholders,
+        applyPlaceholderDelayOnClose = loadingTweaks.applyPlaceholdersOnClose,
+        switchOnDragRelease = loadingTweaks.switchOnDragRelease,
+        isSheetDragGestureActive = isSheetDragGestureActive,
+        sharedBoundsModifier = Modifier.fillMaxWidth().heightIn(min = 70.dp),
+        expansionFractionProvider = expansionFractionProvider,
+        isExpandedOverride = currentSheetState == PlayerSheetState.EXPANDED,
+        normalStartThreshold = 0.20f,
+        delayAppearThreshold = loadingTweaks.contentAppearThresholdPercent / 100f,
+        delayCloseThreshold = 1f - (loadingTweaks.contentCloseThresholdPercent / 100f),
+        placeholder = {
+            if (loadingTweaks.transparentPlaceholders) {
+                Box(Modifier.fillMaxWidth().height(70.dp))
+            } else {
+                MetadataPlaceholder(
+                    expansionFraction = expansionFractionProvider(),
+                    color = placeholderColor,
+                    onColor = placeholderOnColor,
+                    showQueueButtons = isLandscape
+                )
+            }
+        }
+    ) {
+        SongMetadataDisplaySection(
+            modifier = Modifier
+                .padding(start = 0.dp),
+            onClickLyrics = onLyricsClick,
+            song = song,
+            currentSongArtists = currentSongArtists,
+            expansionFractionProvider = expansionFractionProvider,
+            textColor = playerOnBaseColor,
+            artistTextColor = playerOnBaseColor.copy(alpha = 0.7f),
+            playerViewModel = playerViewModel,
+            gradientEdgeColor = gradientEdgeColor,
+            chipColor = chipColor,
+            chipContentColor = chipContentColor,
+            showQueueButton = isLandscape,
+            onClickQueue = onQueueClick,
+            onClickArtist = onArtistClick
+        )
+    }
+}
+
+@Composable
+private fun FullPlayerPortraitContent(
+    paddingValues: PaddingValues,
+    albumCoverSection: @Composable (Modifier) -> Unit,
+    songMetadataSection: @Composable () -> Unit,
+    playerProgressSection: @Composable () -> Unit,
+    controlsSection: @Composable () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)
+            .padding(
+                horizontal = 24.dp,
+                vertical = 0.dp
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceAround
+    ) {
+        albumCoverSection(Modifier)
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(Modifier.align(Alignment.Start)) {
+                songMetadataSection()
+            }
+            playerProgressSection()
+        }
+
+        controlsSection()
+    }
+}
+
+@Composable
+private fun FullPlayerLandscapeContent(
+    paddingValues: PaddingValues,
+    albumCoverSection: @Composable (Modifier) -> Unit,
+    songMetadataSection: @Composable () -> Unit,
+    playerProgressSection: @Composable () -> Unit,
+    controlsSection: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues)
+            .padding(
+                horizontal = 24.dp,
+                vertical = 0.dp
+            ),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        albumCoverSection(
+            Modifier
+                .fillMaxHeight()
+                .weight(1f)
+        )
+        Spacer(Modifier.width(9.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(1f)
+                .padding(
+                    horizontal = 0.dp,
+                    vertical = 0.dp
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceEvenly
+        ) {
+            songMetadataSection()
+            playerProgressSection()
+            controlsSection()
+        }
+    }
+}
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
