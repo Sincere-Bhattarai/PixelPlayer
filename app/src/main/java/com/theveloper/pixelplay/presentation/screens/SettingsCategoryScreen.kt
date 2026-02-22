@@ -61,6 +61,7 @@ import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
@@ -535,7 +536,7 @@ fun SettingsCategoryScreen(
                                     subtitle = "Cycle through collage patterns each time you visit Home.",
                                     checked = uiState.collageAutoRotate,
                                     onCheckedChange = { settingsViewModel.setCollageAutoRotate(it) },
-                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_shuffle_on_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                    leadingIcon = { Icon(painterResource(R.drawable.rounded_shuffle_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
                             }
 
@@ -1633,11 +1634,26 @@ private fun BackupSectionSelectableCard(
                     checked = selected,
                     onCheckedChange = { onToggle() },
                     enabled = enabled,
+                    thumbContent = {
+                        AnimatedContent(
+                            targetState = selected,
+                            transitionSpec = { fadeIn(tween(100)) togetherWith fadeOut(tween(100)) },
+                            label = "switch_thumb_icon"
+                        ) { isSelected ->
+                            Icon(
+                                imageVector = if (isSelected) Icons.Rounded.Check else Icons.Rounded.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(SwitchDefaults.IconSize)
+                            )
+                        }
+                    },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                         checkedTrackColor = MaterialTheme.colorScheme.primary,
+                        checkedIconColor = MaterialTheme.colorScheme.primary,
                         uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        uncheckedIconColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 )
             }

@@ -731,7 +731,7 @@ fun PlaylistDetailScreen(
                 )
                 PlaylistActionItem(
                     icon = painterResource(R.drawable.rounded_attach_file_24),
-                    label = "Export M3U",
+                    label = "Export Playlist",
                     onClick = {
                         showPlaylistOptionsSheet = false
                         m3uExportLauncher.launch("${currentPlaylist?.name ?: "playlist"}.m3u")

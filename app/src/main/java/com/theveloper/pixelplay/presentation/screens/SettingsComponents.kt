@@ -1,5 +1,10 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,6 +28,7 @@ import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -179,7 +185,6 @@ fun SwitchSettingItem(
                 checked = checked,
                 onCheckedChange = { newValue ->
                     if (enabled) {
-                        // Haptic feedback on toggle
                         performAppCompatHapticFeedback(
                             view,
                             appHapticsConfig,
@@ -189,13 +194,27 @@ fun SwitchSettingItem(
                     }
                 },
                 enabled = enabled,
-                    colors =
-                            SwitchDefaults.colors(
-                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurface,
-                                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                            )
+                thumbContent = {
+                    AnimatedContent(
+                        targetState = checked,
+                        transitionSpec = { fadeIn(tween(100)) togetherWith fadeOut(tween(100)) },
+                        label = "switch_thumb_icon"
+                    ) { isChecked ->
+                        Icon(
+                            imageVector = if (isChecked) Icons.Rounded.Check else Icons.Rounded.Close,
+                            contentDescription = null,
+                            modifier = Modifier.size(SwitchDefaults.IconSize)
+                        )
+                    }
+                },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                    checkedIconColor = MaterialTheme.colorScheme.primary,
+                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurface,
+                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    uncheckedIconColor = MaterialTheme.colorScheme.surfaceVariant
+                )
             )
         }
     }
@@ -223,11 +242,11 @@ fun ThemeSelectorItem(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
-                    verticalAlignment = Alignment.Top,
-                    modifier = Modifier.fillMaxWidth()
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
-                        modifier = Modifier.padding(end = 16.dp, top = 2.dp).size(24.dp),
+                    modifier = Modifier.padding(end = 16.dp).size(24.dp),
                         contentAlignment = Alignment.Center
                 ) { leadingIcon() }
 
