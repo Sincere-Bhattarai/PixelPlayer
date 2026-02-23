@@ -2786,13 +2786,29 @@ fun LibraryAlbumsTab(
     val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
     val isListView = playerUiState.isAlbumsListView
 
-    // Scroll to top when sort option changes
+    var lastHandledAlbumSortKey by remember {
+        mutableStateOf(playerUiState.currentAlbumSortOption.storageKey)
+    }
+    var pendingAlbumSortScrollReset by remember { mutableStateOf(false) }
+
+    // Mark reset only when the sort option actually changes (skip initial composition).
     LaunchedEffect(playerUiState.currentAlbumSortOption) {
+        val currentSortKey = playerUiState.currentAlbumSortOption.storageKey
+        if (currentSortKey != lastHandledAlbumSortKey) {
+            lastHandledAlbumSortKey = currentSortKey
+            pendingAlbumSortScrollReset = true
+        }
+    }
+
+    // Apply scroll reset after the album list has emitted with the new sort order.
+    LaunchedEffect(albums, isListView) {
+        if (!pendingAlbumSortScrollReset) return@LaunchedEffect
         if (isListView) {
             listState.scrollToItem(0)
         } else {
             gridState.scrollToItem(0)
         }
+        pendingAlbumSortScrollReset = false
     }
 
     // Prefetching logic for LibraryAlbumsTab
@@ -3275,10 +3291,24 @@ fun LibraryArtistsTab(
 ) {
     val listState = rememberLazyListState()
     val playerUiState by playerViewModel.playerUiState.collectAsStateWithLifecycle()
+    var lastHandledArtistSortKey by remember {
+        mutableStateOf(playerUiState.currentArtistSortOption.storageKey)
+    }
+    var pendingArtistSortScrollReset by remember { mutableStateOf(false) }
 
-    // Scroll to top when sort option changes
+    // Mark reset only when the sort option actually changes (skip initial composition).
     LaunchedEffect(playerUiState.currentArtistSortOption) {
+        val currentSortKey = playerUiState.currentArtistSortOption.storageKey
+        if (currentSortKey == lastHandledArtistSortKey) return@LaunchedEffect
+        lastHandledArtistSortKey = currentSortKey
+        pendingArtistSortScrollReset = true
+    }
+
+    // Apply scroll reset after artists are re-emitted with the new sort order.
+    LaunchedEffect(artists) {
+        if (!pendingArtistSortScrollReset) return@LaunchedEffect
         listState.scrollToItem(0)
+        pendingArtistSortScrollReset = false
     }
 
     if (isLoading && artists.isEmpty()) {
