@@ -242,6 +242,72 @@ class MusicRepositoryImplTest {
         assertEquals(2, result.first().songCount)
     }
 
+    @Test
+    fun `getGenres deduplicates normalized genre ids`() = runTest(testDispatcher) {
+        every {
+            mockMusicDao.getUniqueGenres(
+                any<List<String>>(),
+                any<Boolean>()
+            )
+        } returns flowOf(listOf("Rock", " Rock ", "rock"))
+        every {
+            mockMusicDao.hasUnknownGenre(
+                any<List<String>>(),
+                any<Boolean>()
+            )
+        } returns flowOf(false)
+
+        val result = musicRepository.getGenres().first()
+
+        assertEquals(1, result.size)
+        assertEquals("rock", result.first().id)
+        assertEquals("Rock", result.first().name)
+    }
+
+    @Test
+    fun `getGenres does not append unknown when already present`() = runTest(testDispatcher) {
+        every {
+            mockMusicDao.getUniqueGenres(
+                any<List<String>>(),
+                any<Boolean>()
+            )
+        } returns flowOf(listOf("Unknown", " unknown "))
+        every {
+            mockMusicDao.hasUnknownGenre(
+                any<List<String>>(),
+                any<Boolean>()
+            )
+        } returns flowOf(true)
+
+        val result = musicRepository.getGenres().first()
+
+        assertEquals(1, result.size)
+        assertEquals(1, result.count { it.id == "unknown" })
+        assertEquals("Unknown", result.first().name)
+    }
+
+    @Test
+    fun `getGenres appends unknown only when needed`() = runTest(testDispatcher) {
+        every {
+            mockMusicDao.getUniqueGenres(
+                any<List<String>>(),
+                any<Boolean>()
+            )
+        } returns flowOf(listOf("Rock"))
+        every {
+            mockMusicDao.hasUnknownGenre(
+                any<List<String>>(),
+                any<Boolean>()
+            )
+        } returns flowOf(true)
+
+        val result = musicRepository.getGenres().first()
+
+        assertEquals(2, result.size)
+        assertTrue(result.any { it.id == "rock" })
+        assertEquals(1, result.count { it.id == "unknown" })
+    }
+
     @Nested
     @DisplayName("Search History Functions")
     inner class SearchHistoryFunctions {

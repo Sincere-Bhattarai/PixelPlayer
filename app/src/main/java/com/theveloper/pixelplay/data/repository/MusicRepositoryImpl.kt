@@ -90,6 +90,8 @@ class MusicRepositoryImpl @Inject constructor(
     companion object {
         /** Maximum number of search results to load at once to avoid memory issues with large libraries. */
         private const val SEARCH_RESULTS_LIMIT = 100
+        private const val UNKNOWN_GENRE_NAME = "Unknown"
+        private const val UNKNOWN_GENRE_ID = "unknown"
     }
 
     private val directoryScanMutex = Mutex()
@@ -506,11 +508,19 @@ class MusicRepositoryImpl @Inject constructor(
                         )
                     ) { genreNames, hasUnknown ->
                         val knownGenres = genreNames
+                            .asSequence()
                             .map { it.trim() }
                             .filter { it.isNotBlank() }
                             .map { buildGenre(it) }
+                            .distinctBy { it.id }
                             .sortedBy { it.name.lowercase() }
-                        if (hasUnknown) knownGenres + buildGenre("Unknown") else knownGenres
+                            .toList()
+                        val unknownAlreadyPresent = knownGenres.any { it.id == UNKNOWN_GENRE_ID }
+                        if (hasUnknown && !unknownAlreadyPresent) {
+                            knownGenres + buildGenre(UNKNOWN_GENRE_NAME)
+                        } else {
+                            knownGenres
+                        }
                     }
                 )
             }.flatMapLatest { it }
@@ -518,8 +528,8 @@ class MusicRepositoryImpl @Inject constructor(
     }
 
     private fun buildGenre(genreName: String): Genre {
-        val id = if (genreName.equals("Unknown", ignoreCase = true)) {
-            "unknown"
+        val id = if (genreName.equals(UNKNOWN_GENRE_NAME, ignoreCase = true)) {
+            UNKNOWN_GENRE_ID
         } else {
             genreName
                 .lowercase()
