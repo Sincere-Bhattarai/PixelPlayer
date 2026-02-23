@@ -230,16 +230,16 @@ fun UnifiedPlayerSheetV2(
         playerViewModel = playerViewModel
     )
 
+    // FullPlayerVisualState now holds lazy getters that read from the Animatable
+    // inside graphicsLayer (draw-phase), avoiding per-frame recomposition.
     val fullPlayerVisualState = rememberFullPlayerVisualState(
-        expansionFraction = playerContentExpansionFraction.value,
+        expansionFraction = playerContentExpansionFraction,
         initialOffsetY = initialFullPlayerOffsetY
     )
-    val fullPlayerContentAlpha = fullPlayerVisualState.contentAlpha
-    val fullPlayerTranslationY = fullPlayerVisualState.translationY
     val fullPlayerCompositionPolicy = rememberFullPlayerCompositionPolicy(
         currentSongId = infrequentPlayerState.currentSong?.id,
         currentSheetState = currentSheetContentState,
-        expansionFraction = playerContentExpansionFraction.value
+        expansionFraction = playerContentExpansionFraction
     )
     val shouldRenderFullPlayer = fullPlayerCompositionPolicy.shouldRenderFullPlayer
 
@@ -447,7 +447,6 @@ fun UnifiedPlayerSheetV2(
         currentSong = currentSong,
         themedAlbumArtUri = themedAlbumArtUri,
         preparingSongId = preparingSongId,
-        playerContentExpansionFraction = playerContentExpansionFraction,
         systemColorScheme = MaterialTheme.colorScheme
     )
     val albumColorScheme = sheetThemeState.albumColorScheme
@@ -456,17 +455,12 @@ fun UnifiedPlayerSheetV2(
     val miniReadyAlpha = sheetThemeState.miniReadyAlpha
     val miniAppearScale = sheetThemeState.miniAppearScale
     val playerAreaBackground = sheetThemeState.playerAreaBackground
-    val effectivePlayerAreaElevation = sheetThemeState.effectivePlayerAreaElevation
-    val miniAlpha = sheetThemeState.miniAlpha
-    val visualCardShadowElevation by remember(
-        effectivePlayerAreaElevation,
-        showQueueSheet,
-        playerContentExpansionFraction
-    ) {
+    // Elevation is only visible in the mini/collapsed state (expansion < 0.18).
+    // miniReadyAlpha fades the shadow in during the initial song-appear animation.
+    val visualCardShadowElevation by remember(showQueueSheet, miniReadyAlpha) {
         derivedStateOf {
-            // Keep rich shadow in mini/collapsing states, but drop expensive blur when full player/queue are active.
             if (showQueueSheet || playerContentExpansionFraction.value > 0.18f) 0.dp
-            else effectivePlayerAreaElevation
+            else (3f * miniReadyAlpha).dp
         }
     }
 
@@ -574,12 +568,10 @@ fun UnifiedPlayerSheetV2(
                             infrequentPlayerState = infrequentPlayerState,
                             isCastConnecting = isCastConnecting,
                             isPreparingPlayback = isPreparingPlayback,
-                            miniAlpha = miniAlpha,
                             playerContentExpansionFraction = playerContentExpansionFraction,
                             albumColorScheme = albumColorScheme,
                             bottomSheetOpenFraction = bottomSheetOpenFraction,
-                            fullPlayerContentAlpha = fullPlayerContentAlpha,
-                            fullPlayerTranslationY = fullPlayerTranslationY,
+                            fullPlayerVisualState = fullPlayerVisualState,
                             currentPlaybackQueue = currentPlaybackQueue,
                             currentQueueSourceName = currentQueueSourceName,
                             currentSheetContentState = currentSheetContentState,

@@ -264,11 +264,9 @@ fun UnifiedPlayerSheet(
     )
 
     val fullPlayerVisualState = rememberFullPlayerVisualState(
-        expansionFraction = playerContentExpansionFraction.value,
+        expansionFraction = playerContentExpansionFraction,
         initialOffsetY = initialFullPlayerOffsetY
     )
-    val fullPlayerContentAlpha = fullPlayerVisualState.contentAlpha
-    val fullPlayerTranslationY = fullPlayerVisualState.translationY
 
     suspend fun animatePlayerSheet(
         targetExpanded: Boolean,
@@ -469,7 +467,6 @@ fun UnifiedPlayerSheet(
         currentSong = currentSong,
         themedAlbumArtUri = themedAlbumArtUri,
         preparingSongId = preparingSongId,
-        playerContentExpansionFraction = playerContentExpansionFraction,
         systemColorScheme = MaterialTheme.colorScheme
     )
     val albumColorScheme = sheetThemeState.albumColorScheme
@@ -478,17 +475,10 @@ fun UnifiedPlayerSheet(
     val miniReadyAlpha = sheetThemeState.miniReadyAlpha
     val miniAppearScale = sheetThemeState.miniAppearScale
     val playerAreaBackground = sheetThemeState.playerAreaBackground
-    val effectivePlayerAreaElevation = sheetThemeState.effectivePlayerAreaElevation
-    val miniAlpha = sheetThemeState.miniAlpha
-    val visualCardShadowElevation by remember(
-        effectivePlayerAreaElevation,
-        showQueueSheet,
-        playerContentExpansionFraction
-    ) {
+    val visualCardShadowElevation by remember(showQueueSheet, miniReadyAlpha) {
         derivedStateOf {
-            // Keep rich shadow in mini/collapsing states, but drop expensive blur when full player/queue are active.
             if (showQueueSheet || playerContentExpansionFraction.value > 0.18f) 0.dp
-            else effectivePlayerAreaElevation
+            else (3f * miniReadyAlpha).dp
         }
     }
 
@@ -598,12 +588,10 @@ fun UnifiedPlayerSheet(
                                 infrequentPlayerState = infrequentPlayerState,
                                 isCastConnecting = isCastConnecting,
                                 isPreparingPlayback = isPreparingPlayback,
-                                miniAlpha = miniAlpha,
                                 playerContentExpansionFraction = playerContentExpansionFraction,
                                 albumColorScheme = albumColorScheme,
                                 bottomSheetOpenFraction = bottomSheetOpenFraction,
-                                fullPlayerContentAlpha = fullPlayerContentAlpha,
-                                fullPlayerTranslationY = fullPlayerTranslationY,
+                                fullPlayerVisualState = fullPlayerVisualState,
                                 currentPlaybackQueue = currentPlaybackQueue,
                                 currentQueueSourceName = currentQueueSourceName,
                                 currentSheetContentState = currentSheetContentState,

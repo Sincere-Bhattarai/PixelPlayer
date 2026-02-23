@@ -5,8 +5,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDp
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.ColorScheme
@@ -17,23 +15,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.util.lerp
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 
+/**
+ * Theme state for the player sheet.
+ *
+ * Expansion-dependent values ([miniAlpha], elevation) are **no longer** included here.
+ * They are computed inline in the consuming composable's `graphicsLayer` / `derivedStateOf`,
+ * reading directly from the [Animatable] expansion fraction during the draw phase.
+ * This eliminates per-frame recomposition that the old [Transition]-based approach caused.
+ */
 internal data class SheetThemeState(
     val albumColorScheme: ColorScheme,
     val miniPlayerScheme: ColorScheme,
     val isPreparingPlayback: Boolean,
     val miniReadyAlpha: Float,
     val miniAppearScale: Float,
-    val playerAreaBackground: Color,
-    val effectivePlayerAreaElevation: Dp,
-    val miniAlpha: Float
+    val playerAreaBackground: Color
 )
 
 @Composable
@@ -44,7 +45,6 @@ internal fun rememberSheetThemeState(
     currentSong: Song?,
     themedAlbumArtUri: String?,
     preparingSongId: String?,
-    playerContentExpansionFraction: Animatable<Float, AnimationVector1D>,
     systemColorScheme: ColorScheme
 ): SheetThemeState {
     val isAlbumArtTheme = playerThemePreference == ThemePreference.ALBUM_ART
@@ -88,13 +88,6 @@ internal fun rememberSheetThemeState(
         }
     }
 
-    val sameSongLastAlbumScheme = remember(currentSong?.id, lastAlbumSchemeSongId, lastAlbumScheme) {
-        if (currentSong?.id != null && currentSong?.id == lastAlbumSchemeSongId) {
-            lastAlbumScheme
-        } else {
-            null
-        }
-    }
     val isPreparingPlayback = remember(preparingSongId, currentSong?.id) {
         preparingSongId != null && preparingSongId == currentSong?.id
     }
@@ -136,14 +129,14 @@ internal fun rememberSheetThemeState(
     val miniAppearScale = lerp(0.985f, 1f, miniAppearProgress.value)
     val playerAreaBackground = miniPlayerScheme.primaryContainer
 
-    val t = rememberExpansionTransition(playerContentExpansionFraction.value)
-    val playerAreaElevation by t.animateDp(label = "elev") { expansion ->
-        lerp(2.dp, 12.dp, expansion)
-    }
-    val effectivePlayerAreaElevation = lerp(0.dp, playerAreaElevation, miniReadyAlpha)
-    val miniAlpha by t.animateFloat(label = "miniAlpha") { expansion ->
-        (1f - expansion * 2f).coerceIn(0f, 1f)
-    }
+    // NOTE: miniAlpha and effectivePlayerAreaElevation are no longer computed here.
+    // They were driven by the expansion fraction via the Transition API, which
+    // read `playerContentExpansionFraction.value` during composition — causing
+    // per-frame recomposition of UnifiedPlayerSheetV2 during every gesture.
+    //
+    // These values are now computed inline at their consumption sites:
+    //   - miniAlpha → inside graphicsLayer in UnifiedPlayerMiniAndFullLayers
+    //   - elevation → inside derivedStateOf for visualCardShadowElevation
 
     return SheetThemeState(
         albumColorScheme = albumColorScheme,
@@ -151,9 +144,7 @@ internal fun rememberSheetThemeState(
         isPreparingPlayback = isPreparingPlayback,
         miniReadyAlpha = miniReadyAlpha,
         miniAppearScale = miniAppearScale,
-        playerAreaBackground = playerAreaBackground,
-        effectivePlayerAreaElevation = effectivePlayerAreaElevation,
-        miniAlpha = miniAlpha
+        playerAreaBackground = playerAreaBackground
     )
 }
 

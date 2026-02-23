@@ -770,10 +770,10 @@ class PlayerViewModel @Inject constructor(
     val favoriteSongIds: StateFlow<Set<String>> = userPreferencesRepository.favoriteSongIdsFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
     val isCurrentSongFavorite: StateFlow<Boolean> = combine(
-        stablePlayerState,
+        stablePlayerState.map { it.currentSong?.id }.distinctUntilChanged(),
         favoriteSongIds
-    ) { state, ids ->
-        state.currentSong?.id?.let { ids.contains(it) } ?: false
+    ) { songId, ids ->
+        songId?.let { ids.contains(it) } ?: false
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     // Library State - delegated to LibraryStateHolder

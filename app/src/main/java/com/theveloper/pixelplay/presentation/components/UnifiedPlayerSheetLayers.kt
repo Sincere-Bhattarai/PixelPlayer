@@ -31,6 +31,7 @@ import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
 import com.theveloper.pixelplay.presentation.components.player.FullPlayerContent
+import com.theveloper.pixelplay.presentation.components.scoped.FullPlayerVisualState
 import com.theveloper.pixelplay.presentation.components.scoped.rememberFullPlayerRuntimePolicy
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
@@ -46,12 +47,10 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
     infrequentPlayerState: StablePlayerState,
     isCastConnecting: Boolean,
     isPreparingPlayback: Boolean,
-    miniAlpha: Float,
     playerContentExpansionFraction: Animatable<Float, AnimationVector1D>,
     albumColorScheme: ColorScheme,
     bottomSheetOpenFraction: Float,
-    fullPlayerContentAlpha: Float,
-    fullPlayerTranslationY: Float,
+    fullPlayerVisualState: FullPlayerVisualState,
     currentPlaybackQueue: ImmutableList<Song>,
     currentQueueSourceName: String,
     currentSheetContentState: PlayerSheetState,
@@ -81,7 +80,12 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .graphicsLayer { alpha = miniAlpha }
+                        .graphicsLayer {
+                            // Compute miniAlpha in the draw phase from the Animatable,
+                            // avoiding per-frame recomposition during gestures.
+                            alpha = (1f - playerContentExpansionFraction.value * 2f)
+                                .coerceIn(0f, 1f)
+                        }
                         .zIndex(miniPlayerZIndex)
                 ) {
                     MiniPlayerContentInternal(
@@ -121,16 +125,17 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                 }
                 val fullPlayerRuntimePolicy = rememberFullPlayerRuntimePolicy(
                     currentSheetState = currentSheetContentState,
-                    expansionFraction = playerContentExpansionFraction.value,
-                    fullPlayerContentAlpha = fullPlayerContentAlpha,
+                    expansionFraction = playerContentExpansionFraction,
                     bottomSheetOpenFraction = bottomSheetOpenFraction
                 )
 
                 Box(
                     modifier = Modifier
                         .graphicsLayer {
-                            alpha = fullPlayerContentAlpha
-                            translationY = fullPlayerTranslationY
+                            // Read from FullPlayerVisualState lazy getters in the draw phase;
+                            // these read Animatable.value internally → re-draw only, no recomposition.
+                            alpha = fullPlayerVisualState.contentAlpha
+                            translationY = fullPlayerVisualState.translationY
                             scaleX = fullPlayerScale
                             scaleY = fullPlayerScale
                         }
