@@ -59,4 +59,10 @@ interface EngagementDao {
      */
     @Query("SELECT * FROM song_engagements ORDER BY play_count DESC LIMIT :limit")
     suspend fun getTopPlayedSongs(limit: Int): List<SongEngagementEntity>
+
+    /**
+     * Get recently played songs ordered by last played timestamp.
+     */
+    @Query("SELECT * FROM song_engagements WHERE last_played_timestamp > 0 ORDER BY last_played_timestamp DESC LIMIT :limit")
+    suspend fun getRecentlyPlayedSongs(limit: Int): List<SongEngagementEntity>
 }
