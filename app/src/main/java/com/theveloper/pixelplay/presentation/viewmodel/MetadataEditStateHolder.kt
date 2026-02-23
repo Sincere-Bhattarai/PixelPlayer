@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import com.theveloper.pixelplay.data.media.CoverArtUpdate
 import com.theveloper.pixelplay.data.media.ImageCacheManager
@@ -88,6 +89,16 @@ class MetadataEditStateHolder @Inject constructor(
         // We parse lyrics here just to ensure they are valid or to have them ready, 
         // essentially mirroring logic in ViewModel
         val parsedLyrics = normalizedLyrics?.let { LyricsUtils.parseLyrics(it) }
+        val resolvedSongId = resolveSongIdForMetadataEdit(song)
+
+        if (resolvedSongId == null) {
+            Log.w("MetadataEditStateHolder", "Cannot edit metadata for non-numeric song id: ${song.id}")
+            return@withContext MetadataEditResult(
+                success = false,
+                error = MetadataEditError.INVALID_INPUT,
+                errorMessage = "This song source does not support metadata editing."
+            )
+        }
 
         val result = songMetadataEditor.editSongMetadata(
             newTitle = newTitle,
@@ -97,7 +108,7 @@ class MetadataEditStateHolder @Inject constructor(
             newLyrics = trimmedLyrics,
             newTrackNumber = newTrackNumber,
             coverArtUpdate = finalCoverArtUpdate,
-            songId = song.id.toLong(),
+            songId = resolvedSongId,
         )
 
         Log.d("MetadataEditStateHolder", "Editor result: success=${result.success}, error=${result.error}")
@@ -107,9 +118,9 @@ class MetadataEditStateHolder @Inject constructor(
             
             // Update Repository (Lyrics)
             if (normalizedLyrics != null) {
-                musicRepository.updateLyrics(song.id.toLong(), normalizedLyrics)
+                musicRepository.updateLyrics(resolvedSongId, normalizedLyrics)
             } else {
-                musicRepository.resetLyrics(song.id.toLong())
+                musicRepository.resetLyrics(resolvedSongId)
             }
 
             val updatedSong = song.copy(
@@ -184,5 +195,23 @@ class MetadataEditStateHolder @Inject constructor(
         } else {
             false
         }
+    }
+
+    private fun resolveSongIdForMetadataEdit(song: Song): Long? {
+        song.id.toLongOrNull()?.let { return it }
+
+        val uriCandidates = buildList {
+            if (song.contentUriString.isNotBlank()) add(song.contentUriString)
+            if (song.id.startsWith("external:")) add(song.id.removePrefix("external:"))
+        }
+
+        for (rawUri in uriCandidates) {
+            val parsedUri = runCatching { Uri.parse(rawUri) }.getOrNull() ?: continue
+            if (parsedUri.scheme != "content") continue
+
+            parsedUri.lastPathSegment?.toLongOrNull()?.let { return it }
+        }
+
+        return null
     }
 }
