@@ -4,19 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.theveloper.pixelplay.data.netease.NeteaseRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 
-/**
- * Simple ViewModel for WebView-based Netease login.
- * The WebView handles the actual login, this just processes the cookies result.
- */
 sealed class NeteaseLoginState {
     object Idle : NeteaseLoginState()
-    object Loading : NeteaseLoginState()
+    data class Loading(val message: String) : NeteaseLoginState()
     data class Success(val nickname: String) : NeteaseLoginState()
     data class Error(val message: String) : NeteaseLoginState()
 }
@@ -26,23 +24,44 @@ class NeteaseLoginViewModel @Inject constructor(
     private val repository: NeteaseRepository
 ) : ViewModel() {
 
+    companion object {
+        private const val COOKIE_LOGIN_TIMEOUT_MS = 25_000L
+    }
+
     private val _state = MutableStateFlow<NeteaseLoginState>(NeteaseLoginState.Idle)
     val state: StateFlow<NeteaseLoginState> = _state.asStateFlow()
 
-    /**
-     * Process cookies captured from the WebView login.
-     * Saves them and fetches user info.
-     */
+    fun clearError() {
+        if (_state.value is NeteaseLoginState.Error) {
+            _state.value = NeteaseLoginState.Idle
+        }
+    }
+
     fun processCookies(cookieJson: String) {
-        _state.value = NeteaseLoginState.Loading
+        if (_state.value is NeteaseLoginState.Loading) return
+
+        _state.value = NeteaseLoginState.Loading("Verifying session with NetEase...")
         viewModelScope.launch {
-            val result = repository.loginWithCookies(cookieJson)
+            val result = try {
+                withTimeout(COOKIE_LOGIN_TIMEOUT_MS) {
+                    repository.loginWithCookies(cookieJson)
+                }
+            } catch (_: TimeoutCancellationException) {
+                Result.failure(
+                    IllegalStateException(
+                        "Verification timed out after ${COOKIE_LOGIN_TIMEOUT_MS / 1000}s. Try again."
+                    )
+                )
+            }
+
             result.fold(
                 onSuccess = { nickname ->
                     _state.value = NeteaseLoginState.Success(nickname)
                 },
                 onFailure = { error ->
-                    _state.value = NeteaseLoginState.Error(error.message ?: "Login failed")
+                    _state.value = NeteaseLoginState.Error(
+                        error.message ?: "NetEase login failed"
+                    )
                 }
             )
         }

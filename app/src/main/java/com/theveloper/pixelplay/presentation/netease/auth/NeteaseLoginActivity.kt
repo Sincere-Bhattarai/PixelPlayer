@@ -1,24 +1,67 @@
 package com.theveloper.pixelplay.presentation.netease.auth
 
 import android.annotation.SuppressLint
+import android.os.Build
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallExtendedFloatingActionButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.ExperimentalTextApi
@@ -31,21 +74,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.ui.theme.PixelPlayTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import org.json.JSONObject
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-/**
- * WebView-based login for Netease Cloud Music.
- * User logs in at music.163.com in the WebView, then taps "Done" to
- * capture the MUSIC_U session cookie. Cookies are saved directly via
- * the ViewModel/Repository — no activity result needed.
- *
- * Same approach as NeriPlayer.
- */
 @AndroidEntryPoint
 class NeteaseLoginActivity : ComponentActivity() {
 
@@ -53,8 +89,8 @@ class NeteaseLoginActivity : ComponentActivity() {
         const val TARGET_URL = "https://music.163.com/"
         const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Chrome/124.0.0.0 Safari/537.36"
+                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/124.0.0.0 Safari/537.36"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,6 +104,16 @@ class NeteaseLoginActivity : ComponentActivity() {
     }
 }
 
+private data class NeteaseWebUiState(
+    val title: String = "",
+    val currentUrl: String = NeteaseLoginActivity.TARGET_URL,
+    val canGoBack: Boolean = false,
+    val canGoForward: Boolean = false,
+    val isLoadingPage: Boolean = true,
+    val pageProgress: Int = 0,
+    val lastError: String? = null
+)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NeteaseWebLoginScreen(
@@ -75,35 +121,112 @@ fun NeteaseWebLoginScreen(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    var webView by remember { mutableStateOf<WebView?>(null) }
     val loginState by viewModel.state.collectAsStateWithLifecycle()
     val titleStyle = rememberNeteaseLoginTitleStyle()
-
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Handle login state changes
+    var webView by remember { mutableStateOf<WebView?>(null) }
+    var webUiState by remember { mutableStateOf(NeteaseWebUiState()) }
+    var showExitDialog by remember { mutableStateOf(false) }
+    var pageLoadTimeout by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            webView?.destroy()
+            webView = null
+        }
+    }
+
     LaunchedEffect(loginState) {
         when (val state = loginState) {
             is NeteaseLoginState.Success -> {
                 Toast.makeText(context, "Welcome, ${state.nickname}!", Toast.LENGTH_SHORT).show()
                 onClose()
             }
+
             is NeteaseLoginState.Error -> {
                 snackbarHostState.showSnackbar(state.message)
+                viewModel.clearError()
             }
-            else -> {}
+
+            else -> Unit
         }
     }
 
-    fun onDoneClick() {
+    LaunchedEffect(webUiState.isLoadingPage, webUiState.currentUrl) {
+        if (!webUiState.isLoadingPage) {
+            pageLoadTimeout = false
+            return@LaunchedEffect
+        }
+
+        delay(20_000)
+        if (webUiState.isLoadingPage) {
+            pageLoadTimeout = true
+            snackbarHostState.showSnackbar("Page load timed out. You can retry without losing your progress.")
+        }
+    }
+
+    BackHandler(enabled = true) {
+        when {
+            webView?.canGoBack() == true -> webView?.goBack()
+            else -> showExitDialog = true
+        }
+    }
+
+    fun captureAndSubmitCookies() {
         if (loginState is NeteaseLoginState.Loading) return
-        readAndProcessCookies(
-            onSuccess = { cookieJson -> viewModel.processCookies(cookieJson) },
-            onError = { msg ->
-                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+
+        readAndProcessCookies().fold(
+            onSuccess = { cookieJson ->
+                viewModel.processCookies(cookieJson)
+            },
+            onFailure = { error ->
+                val message = error.message ?: "Could not read session cookies."
+                viewModel.clearError()
+                webUiState = webUiState.copy(lastError = message)
             }
         )
     }
+
+    fun navigateBack() {
+        if (webView?.canGoBack() == true) {
+            webView?.goBack()
+        } else {
+            showExitDialog = true
+        }
+    }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = {
+                Text(text = "Exit NetEase login?", fontFamily = GoogleSansRounded)
+            },
+            text = {
+                Text(
+                    text = "You can come back later. Current page state will be discarded when closing.",
+                    fontFamily = GoogleSansRounded
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitDialog = false
+                        onClose()
+                    }
+                ) {
+                    Text(text = "Exit", fontFamily = GoogleSansRounded)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) {
+                    Text(text = "Stay", fontFamily = GoogleSansRounded)
+                }
+            }
+        )
+    }
+
+    val appBarTitle = "Login to NetEase" //webUiState.title.ifBlank { "Login to NetEase" } add after translations
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -111,29 +234,23 @@ fun NeteaseWebLoginScreen(
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        //modifier = Modifier.padding(start = 4.dp),
-                        text = "Login to Netease",
+                        text = appBarTitle,
                         style = titleStyle,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
                     )
                 },
                 navigationIcon = {
                     FilledIconButton(
                         modifier = Modifier.padding(start = 6.dp),
-                        onClick = {
-                            if (webView?.canGoBack() == true) {
-                                webView?.goBack()
-                            } else {
-                                onClose()
-                            }
-                        },
+                        onClick = ::navigateBack,
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         )
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
@@ -151,6 +268,40 @@ fun NeteaseWebLoginScreen(
                 actions = {
                     FilledIconButton(
                         modifier = Modifier.padding(start = 10.dp),
+                        onClick = { webView?.goBack() },
+                        enabled = webUiState.canGoBack && loginState !is NeteaseLoginState.Loading,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Web back"
+                        )
+                    }
+
+                    FilledIconButton(
+                        modifier = Modifier.padding(start = 8.dp),
+                        onClick = { webView?.goForward() },
+                        enabled = webUiState.canGoForward && loginState !is NeteaseLoginState.Loading,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                            contentDescription = "Web forward"
+                        )
+                    }
+
+                    FilledIconButton(
+                        modifier = Modifier.padding(start = 8.dp),
                         onClick = { webView?.reload() },
                         enabled = loginState !is NeteaseLoginState.Loading,
                         colors = IconButtonDefaults.filledIconButtonColors(
@@ -161,14 +312,32 @@ fun NeteaseWebLoginScreen(
                         )
                     ) {
                         Icon(
-                            Icons.Rounded.Refresh,
+                            imageVector = Icons.Rounded.Refresh,
                             contentDescription = "Refresh"
+                        )
+                    }
+
+                    FilledIconButton(
+                        modifier = Modifier.padding(start = 8.dp),
+                        onClick = {
+                            webUiState = webUiState.copy(lastError = null)
+                            webView?.loadUrl(NeteaseLoginActivity.TARGET_URL)
+                        },
+                        enabled = loginState !is NeteaseLoginState.Loading,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Home,
+                            contentDescription = "Open home"
                         )
                     }
                 },
                 floatingActionButton = {
-                    ExtendedFloatingActionButton(
-                        onClick = ::onDoneClick,
+                    SmallExtendedFloatingActionButton(
+                        onClick = ::captureAndSubmitCookies,
                         shape = CircleShape,
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer
@@ -181,14 +350,13 @@ fun NeteaseWebLoginScreen(
                             )
                         } else {
                             Icon(
-                                Icons.Rounded.Check,
-                                contentDescription = null,
-                                //modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null
                             )
                         }
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (loginState is NeteaseLoginState.Loading) "Saving…" else "Done",
+                            text = if (loginState is NeteaseLoginState.Loading) "Saving..." else "Done",
                             fontFamily = GoogleSansRounded,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -197,12 +365,118 @@ fun NeteaseWebLoginScreen(
             )
         }
     ) { paddingValues ->
-        NeteaseWebView(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
-            onWebViewCreated = { webView = it }
-        )
+                .padding(paddingValues)
+        ) {
+            if (webUiState.isLoadingPage) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    progress = { (webUiState.pageProgress / 100f).coerceIn(0f, 1f) }
+                )
+            }
+
+            ElevatedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                )
+            ) {
+                Text(
+                    text = "Security note: your password is entered only in NetEase web pages. PixelPlay stores session cookies (MUSIC_U) to sync your library.",
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            val effectiveError = when {
+                pageLoadTimeout -> "Page is taking too long to load. Use refresh or try another network."
+                webUiState.lastError != null -> webUiState.lastError
+                else -> null
+            }
+
+            effectiveError?.let { errorText ->
+                ElevatedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = errorText,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = GoogleSansRounded,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = {
+                                pageLoadTimeout = false
+                                webUiState = webUiState.copy(lastError = null)
+                                webView?.reload()
+                            }
+                        ) {
+                            Text(text = "Retry", fontFamily = GoogleSansRounded)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                NeteaseWebView(
+                    modifier = Modifier.fillMaxSize(),
+                    onWebViewCreated = { created ->
+                        webView = created
+                        webUiState = webUiState.copy(
+                            canGoBack = created.canGoBack(),
+                            canGoForward = created.canGoForward(),
+                            currentUrl = created.url ?: NeteaseLoginActivity.TARGET_URL,
+                            title = created.title.orEmpty()
+                        )
+                    },
+                    onNavigationChanged = { view ->
+                        webUiState = webUiState.copy(
+                            canGoBack = view.canGoBack(),
+                            canGoForward = view.canGoForward(),
+                            currentUrl = view.url ?: NeteaseLoginActivity.TARGET_URL,
+                            title = view.title.orEmpty()
+                        )
+                    },
+                    onLoadingChanged = { loading, url ->
+                        webUiState = webUiState.copy(
+                            isLoadingPage = loading,
+                            currentUrl = url ?: webUiState.currentUrl,
+                            lastError = if (loading) null else webUiState.lastError
+                        )
+                    },
+                    onProgressChanged = { progress ->
+                        webUiState = webUiState.copy(pageProgress = progress.coerceIn(0, 100))
+                    },
+                    onMainFrameError = { message ->
+                        webUiState = webUiState.copy(lastError = message, isLoadingPage = false)
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -236,25 +510,94 @@ private fun rememberNeteaseLoginTitleStyle(): TextStyle {
 @Composable
 private fun NeteaseWebView(
     modifier: Modifier = Modifier,
-    onWebViewCreated: (WebView) -> Unit
+    onWebViewCreated: (WebView) -> Unit,
+    onNavigationChanged: (WebView) -> Unit,
+    onLoadingChanged: (Boolean, String?) -> Unit,
+    onProgressChanged: (Int) -> Unit,
+    onMainFrameError: (String) -> Unit
 ) {
     AndroidView(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
+                val cookieManager = CookieManager.getInstance()
+                cookieManager.setAcceptCookie(true)
+                cookieManager.setAcceptThirdPartyCookies(this, true)
+
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                     userAgentString = NeteaseLoginActivity.DESKTOP_UA
                     useWideViewPort = true
                     loadWithOverviewMode = true
                     setSupportZoom(true)
                     builtInZoomControls = true
                     displayZoomControls = false
+                    allowFileAccess = false
+                    allowContentAccess = false
+                    javaScriptCanOpenWindowsAutomatically = false
+                    setSupportMultipleWindows(false)
                 }
-                webChromeClient = WebChromeClient()
-                webViewClient = WebViewClient()
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    settings.safeBrowsingEnabled = true
+                }
+
+                webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                        onProgressChanged(newProgress)
+                    }
+                }
+
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): Boolean {
+                        return false
+                    }
+
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        onLoadingChanged(true, url)
+                        view?.let(onNavigationChanged)
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        onLoadingChanged(false, url)
+                        view?.let(onNavigationChanged)
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?
+                    ) {
+                        super.onReceivedError(view, request, error)
+                        if (request?.isForMainFrame == true) {
+                            val description = error?.description?.toString()?.ifBlank {
+                                "WebView load failed."
+                            } ?: "WebView load failed."
+                            onMainFrameError(description)
+                        }
+                    }
+
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        errorResponse: WebResourceResponse?
+                    ) {
+                        super.onReceivedHttpError(view, request, errorResponse)
+                        if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 200) >= 400) {
+                            onMainFrameError(
+                                "HTTP ${errorResponse?.statusCode ?: 0} while loading NetEase."
+                            )
+                        }
+                    }
+                }
+
                 loadUrl(NeteaseLoginActivity.TARGET_URL)
                 onWebViewCreated(this)
             }
@@ -262,22 +605,15 @@ private fun NeteaseWebView(
     )
 }
 
-/**
- * Read cookies from the WebView's CookieManager and pass them as JSON.
- */
-private fun readAndProcessCookies(
-    onSuccess: (String) -> Unit,
-    onError: (String) -> Unit
-) {
-    try {
+private fun readAndProcessCookies(): Result<String> {
+    return try {
         val cm = CookieManager.getInstance()
         val main = cm.getCookie("https://music.163.com") ?: ""
         val api = cm.getCookie("https://interface.music.163.com") ?: ""
         val merged = listOf(main, api).filter { it.isNotBlank() }.joinToString("; ")
 
         if (merged.isBlank()) {
-            onError("No cookies found. Please log in first.")
-            return
+            return Result.failure(IllegalStateException("No cookies found. Log in first."))
         }
 
         val map = cookieStringToMap(merged)
@@ -285,14 +621,19 @@ private fun readAndProcessCookies(
         if (!map.containsKey("appver")) map["appver"] = "8.10.35"
 
         if (!map.containsKey("MUSIC_U")) {
-            onError("Login not detected yet. Complete login and try again.")
-            return
+            return Result.failure(
+                IllegalStateException(
+                    "Login not detected yet. Complete NetEase login before pressing Done."
+                )
+            )
         }
 
         val json = JSONObject(map as Map<*, *>).toString()
-        onSuccess(json)
-    } catch (e: Throwable) {
-        onError("Failed: ${e.message}")
+        Result.success(json)
+    } catch (error: Throwable) {
+        Result.failure(
+            IllegalStateException("Failed to read NetEase cookies: ${error.message}", error)
+        )
     }
 }
 

@@ -1,13 +1,9 @@
 package com.theveloper.pixelplay.data.telegram
 
 import android.content.Context
-import com.theveloper.pixelplay.utils.LogUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -40,6 +36,9 @@ class TelegramClientManager @Inject constructor(
     private val _updates = MutableSharedFlow<TdApi.Object>(extraBufferCapacity = 64)
     val updates = _updates.asSharedFlow()
 
+    private val _errors = MutableSharedFlow<TdApi.Error>(extraBufferCapacity = 16)
+    val errors = _errors.asSharedFlow()
+
     private var client: Client? = null
 
     // Handler for incoming updates from TDLib
@@ -59,7 +58,7 @@ class TelegramClientManager @Inject constructor(
                 else -> {}
             }
         } else if (update is TdApi.Error) {
-            Timber.e("TDLib Error: ${update.message}")
+            reportTdError(update)
         }
     }
 
@@ -160,7 +159,15 @@ class TelegramClientManager @Inject constructor(
         if (localClient != null) {
             localClient.send(function) { result ->
                 if (result is TdApi.Error) {
-                    continuation.resumeWith(Result.failure(Exception(result.message)))
+                    reportTdError(result)
+                    continuation.resumeWith(
+                        Result.failure(
+                            TdlibRequestException(
+                                code = result.code,
+                                rawMessage = result.message
+                            )
+                        )
+                    )
                 } else {
                     @Suppress("UNCHECKED_CAST")
                     continuation.resumeWith(Result.success(result as T))
@@ -173,8 +180,13 @@ class TelegramClientManager @Inject constructor(
 
     private val defaultHandler = Client.ResultHandler { result ->
         if (result is TdApi.Error) {
-            Timber.e("TDLib Error: ${result.code} - ${result.message}")
+            reportTdError(result)
         }
+    }
+
+    private fun reportTdError(error: TdApi.Error) {
+        _errors.tryEmit(error)
+        Timber.e("TDLib Error: ${error.code} - ${error.message}")
     }
 
     /**
@@ -204,3 +216,8 @@ class TelegramClientManager @Inject constructor(
         }
     }
 }
+
+class TdlibRequestException(
+    val code: Int,
+    rawMessage: String?
+) : Exception(rawMessage ?: "Unknown TDLib error")

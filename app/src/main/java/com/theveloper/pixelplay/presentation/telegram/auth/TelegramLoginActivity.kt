@@ -1,34 +1,40 @@
 package com.theveloper.pixelplay.presentation.telegram.auth
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.FocusInteraction
-import androidx.compose.foundation.interaction.Interaction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,8 +49,33 @@ import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Sms
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumExtendedFloatingActionButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,7 +88,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -67,21 +97,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.media3.common.util.UnstableApi
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.theveloper.pixelplay.MainActivity
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.presentation.telegram.channel.TelegramChannelSearchSheet
 import com.theveloper.pixelplay.presentation.telegram.dashboard.TelegramDashboardScreen
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.ui.theme.PixelPlayTheme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import org.drinkless.tdlib.TdApi
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import java.util.Locale
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @AndroidEntryPoint
-@OptIn(UnstableApi::class)
 class TelegramLoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,177 +121,225 @@ class TelegramLoginActivity : ComponentActivity() {
     }
 }
 
-@kotlin.OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
-@OptIn(UnstableApi::class)
+private enum class TelegramVisualStep {
+    Phone,
+    Code,
+    Password,
+    Status
+}
+
+@kotlin.OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalMaterial3ExpressiveApi::class
+)
 @Composable
 fun TelegramLoginScreen(
     viewModel: TelegramLoginViewModel = hiltViewModel(),
     onFinish: () -> Unit
 ) {
     val authState by viewModel.authorizationState.collectAsStateWithLifecycle(initialValue = null)
-    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
-    val phoneNumber by viewModel.phoneNumber.collectAsStateWithLifecycle()
-    val code by viewModel.code.collectAsStateWithLifecycle()
-    val password by viewModel.password.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showSearchSheet by remember { mutableStateOf(false) }
 
     if (showSearchSheet) {
-        com.theveloper.pixelplay.presentation.telegram.channel.TelegramChannelSearchSheet(
+        TelegramChannelSearchSheet(
             onDismissRequest = { showSearchSheet = false },
-            onSongSelected = { song ->
-                viewModel.downloadAndPlay(song)
-            }
+            onSongSelected = { song -> viewModel.downloadAndPlay(song) }
         )
     }
 
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+
     LaunchedEffect(Unit) {
-        viewModel.playbackRequest.collect { song: com.theveloper.pixelplay.data.model.Song ->
-            val intent = android.content.Intent(context, com.theveloper.pixelplay.MainActivity::class.java).apply {
+        viewModel.events.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.playbackRequest.collect { song ->
+            val intent = Intent(context, MainActivity::class.java).apply {
                 action = "com.theveloper.pixelplay.ACTION_PLAY_SONG"
                 putExtra("song", song as android.os.Parcelable)
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
             context.startActivity(intent)
             onFinish()
         }
     }
 
-    if (authState is TdApi.AuthorizationStateReady && !isLoading) {
-        // Show the new Dashboard
+    if (authState is TdApi.AuthorizationStateReady && !uiState.isLoading) {
         TelegramDashboardScreen(
             onAddChannel = { showSearchSheet = true },
             onBack = onFinish
         )
-    } else {
-        // Expressive Login UI
-        val gradientColors = listOf(
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-            MaterialTheme.colorScheme.surface
-        )
+        return
+    }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { },
-                    navigationIcon = {
-                        FilledIconButton(
-                            onClick = onFinish,
-                            modifier = Modifier.padding(start = 8.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            )
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = "Back"
-                            )
-                        }
+    val visualStep = remember(authState, uiState.phoneEditMode) {
+        resolveTelegramVisualStep(authState, uiState.phoneEditMode)
+    }
+
+    BackHandler(enabled = true) {
+        if (!viewModel.handleBackNavigation(authState)) {
+            onFinish()
+        }
+    }
+
+    val gradientColors = listOf(
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+        MaterialTheme.colorScheme.surface
+    )
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Telegram Login",
+                        fontFamily = GoogleSansRounded,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                },
+                navigationIcon = {
+                    FilledIconButton(
+                        onClick = {
+                            if (!viewModel.handleBackNavigation(authState)) {
+                                onFinish()
+                            }
+                        },
+                        modifier = Modifier.padding(start = 8.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                )
+            )
+        },
+        containerColor = Color.Transparent
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(gradientColors))
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            TelegramBrandingHeader()
+            Spacer(modifier = Modifier.height(20.dp))
+
+            val currentStep = when (visualStep) {
+                TelegramVisualStep.Phone -> 0
+                TelegramVisualStep.Code -> 1
+                TelegramVisualStep.Password -> 2
+                TelegramVisualStep.Status -> -1
+            }
+            if (currentStep >= 0) {
+                StepIndicator(currentStep = currentStep, totalSteps = 3)
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+
+            if (uiState.phoneEditMode && (authState is TdApi.AuthorizationStateWaitCode || authState is TdApi.AuthorizationStateWaitPassword)) {
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = {
+                        Text(
+                            text = "You are editing your number. Sending code again will replace the previous one.",
+                            fontFamily = GoogleSansRounded
+                        )
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent
+                    colors = AssistChipDefaults.assistChipColors(
+                        disabledContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        disabledLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 )
-            },
-            containerColor = Color.Transparent
-        ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(brush = Brush.verticalGradient(gradientColors))
-                    .padding(paddingValues)
-            ) {
-                if (isLoading) {
-                    // Expressive Loading State
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        LoadingIndicator(
-                            modifier = Modifier.size(64.dp),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (uiState.isLoading) {
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Connecting to Telegram...",
-                            style = MaterialTheme.typography.titleMedium,
+                            text = uiState.loadingMessage.ifBlank { "Working..." },
+                            style = MaterialTheme.typography.bodyMedium,
                             fontFamily = GoogleSansRounded,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
-                } else {
-                    // Determine current step for indicator
-                    val currentStep = when (authState) {
-                        is TdApi.AuthorizationStateWaitPhoneNumber -> 0
-                        is TdApi.AuthorizationStateWaitCode -> 1
-                        is TdApi.AuthorizationStateWaitPassword -> 2
-                        else -> -1
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            uiState.inlineError?.let { errorText ->
+                InlineErrorCard(
+                    message = errorText,
+                    onDismiss = viewModel::clearInlineError
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            AnimatedContent(
+                targetState = visualStep,
+                transitionSpec = {
+                    (slideInHorizontally { width -> width / 3 } + fadeIn())
+                        .togetherWith(slideOutHorizontally { width -> -width / 3 } + fadeOut())
+                },
+                label = "telegramLoginStepTransition"
+            ) { step ->
+                when (step) {
+                    TelegramVisualStep.Phone -> {
+                        ExpressivePhoneNumberInput(
+                            phoneNumber = uiState.phoneNumber,
+                            isLoading = uiState.isLoading,
+                            onPhoneNumberChanged = viewModel::onPhoneNumberChanged,
+                            onSend = viewModel::sendPhoneNumber
+                        )
                     }
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Spacer(modifier = Modifier.height(32.dp))
+                    TelegramVisualStep.Code -> {
+                        ExpressiveCodeInput(
+                            code = uiState.code,
+                            isLoading = uiState.isLoading,
+                            onCodeChanged = viewModel::onCodeChanged,
+                            onCheck = viewModel::checkCode,
+                            onEditPhone = viewModel::enablePhoneEditMode,
+                            onResendCode = viewModel::sendPhoneNumber
+                        )
+                    }
 
-                        // Telegram Branding Header
-                        TelegramBrandingHeader()
+                    TelegramVisualStep.Password -> {
+                        ExpressivePasswordInput(
+                            password = uiState.password,
+                            isLoading = uiState.isLoading,
+                            onPasswordChanged = viewModel::onPasswordChanged,
+                            onCheck = viewModel::checkPassword,
+                            onEditPhone = viewModel::enablePhoneEditMode
+                        )
+                    }
 
-                        Spacer(modifier = Modifier.height(32.dp))
-
-                        // Step Indicator
-                        if (currentStep >= 0) {
-                            StepIndicator(
-                                currentStep = currentStep,
-                                totalSteps = 3
-                            )
-                            Spacer(modifier = Modifier.height(32.dp))
-                        }
-
-                        // Animated Content for Auth States
-                        AnimatedContent(
-                            targetState = authState,
-                            transitionSpec = {
-                                (slideInHorizontally { width -> width } + fadeIn())
-                                    .togetherWith(slideOutHorizontally { width -> -width } + fadeOut())
-                            },
-                            label = "AuthStateTransition"
-                        ) { state ->
-                            when (state) {
-                                is TdApi.AuthorizationStateWaitPhoneNumber -> {
-                                    ExpressivePhoneNumberInput(
-                                        phoneNumber = phoneNumber,
-                                        onPhoneNumberChanged = viewModel::onPhoneNumberChanged,
-                                        onSend = viewModel::sendPhoneNumber
-                                    )
-                                }
-                                is TdApi.AuthorizationStateWaitCode -> {
-                                    ExpressiveCodeInput(
-                                        code = code,
-                                        onCodeChanged = viewModel::onCodeChanged,
-                                        onCheck = viewModel::checkCode
-                                    )
-                                }
-                                is TdApi.AuthorizationStateWaitPassword -> {
-                                    ExpressivePasswordInput(
-                                        password = password,
-                                        onPasswordChanged = viewModel::onPasswordChanged,
-                                        onCheck = viewModel::checkPassword
-                                    )
-                                }
-                                is TdApi.AuthorizationStateLoggingOut -> StatusMessage("Logging out...")
-                                is TdApi.AuthorizationStateClosing -> StatusMessage("Closing...")
-                                is TdApi.AuthorizationStateClosed -> StatusMessage("Session Closed")
-                                null -> StatusMessage("Initializing Telegram...")
-                                else -> StatusMessage("State: ${state?.javaClass?.simpleName}")
-                            }
-                        }
+                    TelegramVisualStep.Status -> {
+                        StatusMessage(message = authStateStatusMessage(authState))
                     }
                 }
             }
@@ -271,12 +347,34 @@ fun TelegramLoginScreen(
     }
 }
 
+private fun resolveTelegramVisualStep(
+    authState: TdApi.AuthorizationState?,
+    isPhoneEditMode: Boolean
+): TelegramVisualStep {
+    if (isPhoneEditMode) return TelegramVisualStep.Phone
+
+    return when (authState) {
+        is TdApi.AuthorizationStateWaitPhoneNumber -> TelegramVisualStep.Phone
+        is TdApi.AuthorizationStateWaitCode -> TelegramVisualStep.Code
+        is TdApi.AuthorizationStateWaitPassword -> TelegramVisualStep.Password
+        else -> TelegramVisualStep.Status
+    }
+}
+
+private fun authStateStatusMessage(state: TdApi.AuthorizationState?): String {
+    return when (state) {
+        null -> "Initializing Telegram..."
+        is TdApi.AuthorizationStateLoggingOut -> "Logging out..."
+        is TdApi.AuthorizationStateClosing -> "Closing session..."
+        is TdApi.AuthorizationStateClosed -> "Session closed. Re-open login to continue."
+        is TdApi.AuthorizationStateWaitTdlibParameters -> "Preparing secure Telegram session..."
+        else -> "Waiting for Telegram response..."
+    }
+}
+
 @Composable
 private fun TelegramBrandingHeader() {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Telegram-style icon
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
                 .size(80.dp)
@@ -292,11 +390,11 @@ private fun TelegramBrandingHeader() {
             )
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         Text(
             text = "Connect Telegram",
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.headlineSmall,
             fontFamily = GoogleSansRounded,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
@@ -305,8 +403,8 @@ private fun TelegramBrandingHeader() {
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Stream music from your Telegram channels",
-            style = MaterialTheme.typography.bodyLarge,
+            text = "Login with robust error handling, timeout control, and editable steps.",
+            style = MaterialTheme.typography.bodyMedium,
             fontFamily = GoogleSansRounded,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -323,9 +421,9 @@ private fun StepIndicator(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        repeat(totalSteps) { step ->
-            val isActive = step <= currentStep
-            val isCurrent = step == currentStep
+        repeat(totalSteps) { index ->
+            val isActive = index <= currentStep
+            val isCurrent = index == currentStep
 
             val scale by animateFloatAsState(
                 targetValue = if (isCurrent) 1.2f else 1f,
@@ -333,7 +431,7 @@ private fun StepIndicator(
                     dampingRatio = Spring.DampingRatioMediumBouncy,
                     stiffness = Spring.StiffnessMedium
                 ),
-                label = "stepScale"
+                label = "telegramStepScale"
             )
 
             Box(
@@ -354,16 +452,60 @@ private fun StepIndicator(
 }
 
 @Composable
-private fun StatusMessage(message: String) {
-    Column(
+private fun InlineErrorCard(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            FilledIconButton(
+                onClick = onDismiss,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.22f),
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                )
+            ) {
+                Icon(imageVector = Icons.Rounded.Clear, contentDescription = "Dismiss")
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusMessage(message: String) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
     ) {
         Text(
             text = message,
+            modifier = Modifier.padding(20.dp),
             style = MaterialTheme.typography.bodyLarge,
             fontFamily = GoogleSansRounded,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -371,25 +513,32 @@ private fun StatusMessage(message: String) {
 @kotlin.OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ExpressivePhoneNumberInput(
-    phoneNumber:          String,
+    phoneNumber: String,
+    isLoading: Boolean,
     onPhoneNumberChanged: (String) -> Unit,
-    onSend:               () -> Unit
+    onSend: () -> Unit
 ) {
-    var countryCode      by remember { mutableStateOf("") }
-    var localNumber      by remember { mutableStateOf("") }
+    var countryCode by remember { mutableStateOf("") }
+    var localNumber by remember { mutableStateOf("") }
     var codeFieldFocused by remember { mutableStateOf(false) }
-    var numFieldFocused  by remember { mutableStateOf(false) }
-    var isExpanded       by remember { mutableStateOf(false) }
+    var numFieldFocused by remember { mutableStateOf(false) }
+    var isExpanded by remember { mutableStateOf(false) }
 
-    val numFocusRequester  = remember { FocusRequester() }
+    val numFocusRequester = remember { FocusRequester() }
     val codeFocusRequester = remember { FocusRequester() }
-    val focusManager       = LocalFocusManager.current
-    val context            = LocalContext.current
-    val isActive           = codeFieldFocused || numFieldFocused
+    val context = LocalContext.current
+    val isActive = codeFieldFocused || numFieldFocused
 
     LaunchedEffect(Unit) {
-        val tm = context.getSystemService(Context.TELEPHONY_SERVICE)
-                as? android.telephony.TelephonyManager
+        val (parsedCode, parsedLocal) = splitPhoneNumberForInput(phoneNumber)
+        if (parsedCode.isNotEmpty() || parsedLocal.isNotEmpty()) {
+            countryCode = parsedCode
+            localNumber = parsedLocal
+            isExpanded = true
+            return@LaunchedEffect
+        }
+
+        val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
         val iso = tm?.networkCountryIso?.uppercase()?.takeIf { it.isNotEmpty() }
             ?: tm?.simCountryIso?.uppercase()?.takeIf { it.isNotEmpty() }
             ?: Locale.getDefault().country
@@ -403,45 +552,46 @@ fun ExpressivePhoneNumberInput(
     }
 
     LaunchedEffect(isExpanded) {
-        if (isExpanded) {
-            if (countryCode.isEmpty()) codeFocusRequester.requestFocus()
-            else numFocusRequester.requestFocus()
-        }
+        if (!isExpanded || isLoading) return@LaunchedEffect
+        if (countryCode.isEmpty()) codeFocusRequester.requestFocus() else numFocusRequester.requestFocus()
     }
 
     val inputShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTR = 16.dp, cornerRadiusTL = 16.dp,
-        cornerRadiusBR = 16.dp, cornerRadiusBL = 16.dp,
-        smoothnessAsPercentTR = 60, smoothnessAsPercentTL = 60,
-        smoothnessAsPercentBR = 60, smoothnessAsPercentBL = 60
+        cornerRadiusTR = 16.dp,
+        cornerRadiusTL = 16.dp,
+        cornerRadiusBR = 16.dp,
+        cornerRadiusBL = 16.dp,
+        smoothnessAsPercentTR = 60,
+        smoothnessAsPercentTL = 60,
+        smoothnessAsPercentBR = 60,
+        smoothnessAsPercentBL = 60
     )
 
     val borderColor by animateColorAsState(
-        targetValue = if (isActive) MaterialTheme.colorScheme.primary
-        else          MaterialTheme.colorScheme.outline,
-        label = "borderColor"
+        targetValue = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+        label = "phoneBorderColor"
     )
-    val borderWidth    = if (isActive) 2.dp else 1.dp
-    val containerColor = if (isActive) MaterialTheme.colorScheme.surfaceContainerHighest
-    else          MaterialTheme.colorScheme.surfaceContainer
-    val labelColor     = if (isActive) MaterialTheme.colorScheme.primary
-    else          MaterialTheme.colorScheme.onSurfaceVariant
+
+    val borderWidth = if (isActive) 2.dp else 1.dp
+    val containerColor = if (isActive) {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
 
     Column(
-        modifier            = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         AuthStepHeader(
-            icon     = Icons.Rounded.Phone,
-            title    = "Phone Number",
-            subtitle = "Enter your Telegram phone number with country code"
+            icon = Icons.Rounded.Phone,
+            title = "Phone Number",
+            subtitle = "Enter your Telegram number. You can come back and edit it later."
         )
 
         Spacer(Modifier.height(24.dp))
 
         Box(modifier = Modifier.fillMaxWidth()) {
-
-            // Field surface
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -449,97 +599,89 @@ fun ExpressivePhoneNumberInput(
                     .clip(inputShape)
                     .background(containerColor)
                     .border(BorderStroke(borderWidth, borderColor), inputShape)
-                    .clickable(enabled = !isExpanded) { isExpanded = true }
+                    .clickable(enabled = !isExpanded && !isLoading) { isExpanded = true }
             ) {
                 AnimatedContent(
-                    targetState   = isExpanded,
+                    targetState = isExpanded,
                     transitionSpec = {
-                        (fadeIn(tween(200)) + slideInHorizontally { it / 4 })
-                            .togetherWith(fadeOut(tween(150)))
+                        (fadeIn() + slideInHorizontally { it / 4 })
+                            .togetherWith(fadeOut())
                     },
-                    label = "phoneExpand"
+                    label = "phoneExpandedTransition"
                 ) { expanded ->
                     if (!expanded) {
-                        // Collapsed: phone icon + "Phone number" hint
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier          = Modifier
+                            modifier = Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 16.dp)
                         ) {
                             Icon(
-                                imageVector        = Icons.Rounded.Phone,
+                                imageVector = Icons.Rounded.Phone,
                                 contentDescription = null,
-                                tint               = MaterialTheme.colorScheme.primary,
-                                modifier           = Modifier.size(20.dp)
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
                             )
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                text  = "Phone number",
+                                text = "Phone number",
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     fontFamily = GoogleSansRounded,
-                                    color      = MaterialTheme.colorScheme.onSurfaceVariant
-                                        .copy(alpha = 0.5f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                                 )
                             )
                         }
                     } else {
-                        //  Expanded: +code | local number
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier          = Modifier
+                            modifier = Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 16.dp)
                         ) {
                             Text(
-                                text       = "+",
-                                style      = MaterialTheme.typography.bodyLarge,
+                                text = "+",
+                                style = MaterialTheme.typography.bodyLarge,
                                 fontFamily = GoogleSansRounded,
                                 fontWeight = FontWeight.SemiBold,
-                                color      = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface
                             )
 
                             BasicTextField(
-                                value         = countryCode,
+                                value = countryCode,
                                 onValueChange = { raw ->
-                                    val digits = raw.filter { it.isDigit() }.take(4)
+                                    if (isLoading) return@BasicTextField
+                                    val digits = raw.filter(Char::isDigit).take(4)
                                     countryCode = digits
                                     val shouldJump = raw.endsWith(" ") ||
-                                            digits.length >= 3 ||
-                                            (digits.isNotEmpty() && isoForDialCode(digits).isNotEmpty())
-                                    if (shouldJump) {
-                                        countryCode = digits.trimEnd()
-                                        numFocusRequester.requestFocus()
-                                    }
+                                        digits.length >= 3 ||
+                                        (digits.isNotEmpty() && isoForDialCode(digits).isNotEmpty())
+                                    if (shouldJump) numFocusRequester.requestFocus()
                                 },
-                                modifier        = Modifier
-                                    .width(40.dp)
+                                modifier = Modifier
+                                    .width(42.dp)
                                     .focusRequester(codeFocusRequester)
                                     .onFocusChanged { codeFieldFocused = it.isFocused },
-                                textStyle       = MaterialTheme.typography.bodyLarge.copy(
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(
                                     fontFamily = GoogleSansRounded,
                                     fontWeight = FontWeight.SemiBold,
-                                    color      = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface
                                 ),
                                 keyboardOptions = KeyboardOptions(
                                     keyboardType = KeyboardType.Number,
-                                    imeAction    = ImeAction.Next
+                                    imeAction = ImeAction.Next
                                 ),
                                 keyboardActions = KeyboardActions(
                                     onNext = { numFocusRequester.requestFocus() }
                                 ),
-                                cursorBrush   = SolidColor(MaterialTheme.colorScheme.primary),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 decorationBox = { inner ->
                                     Box(contentAlignment = Alignment.CenterStart) {
                                         if (countryCode.isEmpty()) {
                                             Text(
-                                                text  = "91",
+                                                text = "1",
                                                 style = MaterialTheme.typography.bodyLarge.copy(
                                                     fontFamily = GoogleSansRounded,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color      = MaterialTheme.colorScheme
-                                                        .onSurfaceVariant
-                                                        .copy(alpha = 0.4f)
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                                 )
                                             )
                                         }
@@ -554,42 +696,42 @@ fun ExpressivePhoneNumberInput(
                                 modifier = Modifier
                                     .width(1.dp)
                                     .height(24.dp)
-                                    .background(
-                                        if (isActive)
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                                        else
-                                            MaterialTheme.colorScheme.outlineVariant
-                                    )
+                                    .background(MaterialTheme.colorScheme.outlineVariant)
                             )
 
                             Spacer(Modifier.width(12.dp))
 
                             BasicTextField(
-                                value         = localNumber,
+                                value = localNumber,
                                 onValueChange = { raw ->
-                                    localNumber = raw.filter { it.isDigit() }.take(15)
+                                    if (isLoading) return@BasicTextField
+                                    localNumber = raw.filter(Char::isDigit).take(15)
                                 },
-                                modifier      = Modifier
+                                modifier = Modifier
                                     .weight(1f)
                                     .focusRequester(numFocusRequester)
                                     .onFocusChanged { numFieldFocused = it.isFocused },
-                                textStyle     = MaterialTheme.typography.bodyLarge.copy(
-                                    fontFamily    = GoogleSansRounded,
-                                    color         = MaterialTheme.colorScheme.onSurface,
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                    fontFamily = GoogleSansRounded,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     letterSpacing = 1.sp
                                 ),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number,imeAction=ImeAction.Done),
-                                cursorBrush   = SolidColor(MaterialTheme.colorScheme.primary),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done
+                                ),
+                                keyboardActions = KeyboardActions(onDone = {
+                                    if (!isLoading) onSend()
+                                }),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 decorationBox = { inner ->
                                     Box(contentAlignment = Alignment.CenterStart) {
                                         if (localNumber.isEmpty()) {
                                             Text(
-                                                text  = "00000 00000",
+                                                text = "5551234567",
                                                 style = MaterialTheme.typography.bodyLarge.copy(
-                                                    fontFamily    = GoogleSansRounded,
-                                                    color         = MaterialTheme.colorScheme
-                                                        .onSurfaceVariant
-                                                        .copy(alpha = 0.4f),
+                                                    fontFamily = GoogleSansRounded,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                                                     letterSpacing = 1.sp
                                                 )
                                             )
@@ -603,14 +745,13 @@ fun ExpressivePhoneNumberInput(
                 }
             }
 
-            // Floating label — animates in when expanded
-            // Replace the entire AnimatedVisibility block with this:
             if (isExpanded) {
                 Text(
-                    text     = "Phone number",
-                    style    = MaterialTheme.typography.labelSmall.copy(
+                    text = "Phone number",
+                    style = MaterialTheme.typography.labelSmall.copy(
                         fontFamily = GoogleSansRounded,
-                        color      = labelColor
+                        color = if (isActive) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     ),
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -622,88 +763,36 @@ fun ExpressivePhoneNumberInput(
             }
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(28.dp))
 
         ExpressiveButton(
-            text    = "Send Code",
+            text = "Send Code",
             onClick = onSend,
-            enabled = countryCode.isNotEmpty() && localNumber.isNotBlank()
+            enabled = countryCode.isNotEmpty() && localNumber.isNotBlank() && !isLoading,
+            loading = isLoading
         )
     }
-}
-
-// Reverse lookup: given a dial code string, return the ISO that maps to it
-// Used to auto-detect when user has typed a complete known code (e.g. "1", "44", "91")
-fun isoForDialCode(dialCode: String): String {
-    val allIsos = listOf(
-        "AF","AL","DZ","AD","AO","AR","AM","AU","AT","AZ","BS","BH","BD","BY","BE",
-        "BZ","BJ","BT","BO","BA","BW","BR","BN","BG","BF","BI","KH","CM","CA","CV",
-        "CF","TD","CL","CN","CO","KM","CG","CR","HR","CU","CY","CZ","DK","DJ","DO",
-        "EC","EG","SV","GQ","ER","EE","ET","FJ","FI","FR","GA","GM","GE","DE","GH",
-        "GR","GT","GN","GW","GY","HT","HN","HK","HU","IS","IN","ID","IR","IQ","IE",
-        "IL","IT","JM","JP","JO","KZ","KE","KP","KR","KW","KG","LA","LV","LB","LS",
-        "LR","LY","LI","LT","LU","MO","MK","MG","MW","MY","MV","ML","MT","MR","MU",
-        "MX","MD","MC","MN","ME","MA","MZ","MM","NA","NP","NL","NZ","NI","NE","NG",
-        "NO","OM","PK","PW","PA","PG","PY","PE","PH","PL","PT","QA","RO","RU","RW",
-        "SA","SN","RS","SL","SG","SK","SI","SO","ZA","SS","ES","LK","SD","SR","SZ",
-        "SE","CH","SY","TW","TJ","TZ","TH","TL","TG","TO","TT","TN","TR","TM","UG",
-        "UA","AE","GB","US","UY","UZ","VU","VE","VN","YE","ZM","ZW"
-    )
-    return allIsos.firstOrNull { getDialCodeForCountry(it) == dialCode } ?: ""
-}
-
-fun getDialCodeForCountry(isoCode: String): String = when (isoCode.uppercase()) {
-    "AF" -> "93";  "AL" -> "355"; "DZ" -> "213"; "AD" -> "376"; "AO" -> "244"
-    "AR" -> "54";  "AM" -> "374"; "AU" -> "61";  "AT" -> "43";  "AZ" -> "994"
-    "BS" -> "1";   "BH" -> "973"; "BD" -> "880"; "BY" -> "375"; "BE" -> "32"
-    "BZ" -> "501"; "BJ" -> "229"; "BT" -> "975"; "BO" -> "591"; "BA" -> "387"
-    "BW" -> "267"; "BR" -> "55";  "BN" -> "673"; "BG" -> "359"; "BF" -> "226"
-    "BI" -> "257"; "KH" -> "855"; "CM" -> "237"; "CA" -> "1";   "CV" -> "238"
-    "CF" -> "236"; "TD" -> "235"; "CL" -> "56";  "CN" -> "86";  "CO" -> "57"
-    "KM" -> "269"; "CG" -> "242"; "CR" -> "506"; "HR" -> "385"; "CU" -> "53"
-    "CY" -> "357"; "CZ" -> "420"; "DK" -> "45";  "DJ" -> "253"; "DO" -> "1"
-    "EC" -> "593"; "EG" -> "20";  "SV" -> "503"; "GQ" -> "240"; "ER" -> "291"
-    "EE" -> "372"; "ET" -> "251"; "FJ" -> "679"; "FI" -> "358"; "FR" -> "33"
-    "GA" -> "241"; "GM" -> "220"; "GE" -> "995"; "DE" -> "49";  "GH" -> "233"
-    "GR" -> "30";  "GT" -> "502"; "GN" -> "224"; "GW" -> "245"; "GY" -> "592"
-    "HT" -> "509"; "HN" -> "504"; "HK" -> "852"; "HU" -> "36";  "IS" -> "354"
-    "IN" -> "91";  "ID" -> "62";  "IR" -> "98";  "IQ" -> "964"; "IE" -> "353"
-    "IL" -> "972"; "IT" -> "39";  "JM" -> "1";   "JP" -> "81";  "JO" -> "962"
-    "KZ" -> "7";   "KE" -> "254"; "KP" -> "850"; "KR" -> "82";  "KW" -> "965"
-    "KG" -> "996"; "LA" -> "856"; "LV" -> "371"; "LB" -> "961"; "LS" -> "266"
-    "LR" -> "231"; "LY" -> "218"; "LI" -> "423"; "LT" -> "370"; "LU" -> "352"
-    "MO" -> "853"; "MK" -> "389"; "MG" -> "261"; "MW" -> "265"; "MY" -> "60"
-    "MV" -> "960"; "ML" -> "223"; "MT" -> "356"; "MR" -> "222"; "MU" -> "230"
-    "MX" -> "52";  "MD" -> "373"; "MC" -> "377"; "MN" -> "976"; "ME" -> "382"
-    "MA" -> "212"; "MZ" -> "258"; "MM" -> "95";  "NA" -> "264"; "NP" -> "977"
-    "NL" -> "31";  "NZ" -> "64";  "NI" -> "505"; "NE" -> "227"; "NG" -> "234"
-    "NO" -> "47";  "OM" -> "968"; "PK" -> "92";  "PW" -> "680"; "PA" -> "507"
-    "PG" -> "675"; "PY" -> "595"; "PE" -> "51";  "PH" -> "63";  "PL" -> "48"
-    "PT" -> "351"; "QA" -> "974"; "RO" -> "40";  "RU" -> "7";   "RW" -> "250"
-    "SA" -> "966"; "SN" -> "221"; "RS" -> "381"; "SL" -> "232"; "SG" -> "65"
-    "SK" -> "421"; "SI" -> "386"; "SO" -> "252"; "ZA" -> "27";  "SS" -> "211"
-    "ES" -> "34";  "LK" -> "94";  "SD" -> "249"; "SR" -> "597"; "SZ" -> "268"
-    "SE" -> "46";  "CH" -> "41";  "SY" -> "963"; "TW" -> "886"; "TJ" -> "992"
-    "TZ" -> "255"; "TH" -> "66";  "TL" -> "670"; "TG" -> "228"; "TO" -> "676"
-    "TT" -> "1";   "TN" -> "216"; "TR" -> "90";  "TM" -> "993"; "UG" -> "256"
-    "UA" -> "380"; "AE" -> "971"; "GB" -> "44";  "US" -> "1";   "UY" -> "598"
-    "UZ" -> "998"; "VU" -> "678"; "VE" -> "58";  "VN" -> "84";  "YE" -> "967"
-    "ZM" -> "260"; "ZW" -> "263"
-    else -> ""
 }
 
 @kotlin.OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ExpressiveCodeInput(
     code: String,
+    isLoading: Boolean,
     onCodeChanged: (String) -> Unit,
-    onCheck: () -> Unit
+    onCheck: () -> Unit,
+    onEditPhone: () -> Unit,
+    onResendCode: () -> Unit
 ) {
     val inputShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTR = 16.dp, cornerRadiusTL = 16.dp,
-        cornerRadiusBR = 16.dp, cornerRadiusBL = 16.dp,
-        smoothnessAsPercentTR = 60, smoothnessAsPercentTL = 60,
-        smoothnessAsPercentBR = 60, smoothnessAsPercentBL = 60
+        cornerRadiusTR = 16.dp,
+        cornerRadiusTL = 16.dp,
+        cornerRadiusBR = 16.dp,
+        cornerRadiusBL = 16.dp,
+        smoothnessAsPercentTR = 60,
+        smoothnessAsPercentTL = 60,
+        smoothnessAsPercentBR = 60,
+        smoothnessAsPercentBL = 60
     )
 
     Column(
@@ -713,25 +802,32 @@ fun ExpressiveCodeInput(
         AuthStepHeader(
             icon = Icons.Rounded.Sms,
             title = "Verification Code",
-            subtitle = "Enter the code sent to your Telegram app"
+            subtitle = "Enter the code from Telegram. If the number is wrong, go back and edit it."
         )
 
         Spacer(Modifier.height(24.dp))
 
         OutlinedTextField(
             value = code,
-            onValueChange = onCodeChanged,
+            onValueChange = { onCodeChanged(it.filter(Char::isDigit).take(8)) },
             label = { Text("Code", fontFamily = GoogleSansRounded) },
-            placeholder = { Text("12345") },
+            placeholder = { Text("12345", fontFamily = GoogleSansRounded) },
             leadingIcon = {
                 Icon(
-                    Icons.Rounded.Sms,
+                    imageVector = Icons.Rounded.Sms,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
                 )
             },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(onDone = {
+                if (!isLoading) onCheck()
+            }),
             singleLine = true,
+            enabled = !isLoading,
             modifier = Modifier.fillMaxWidth(),
             shape = inputShape,
             colors = OutlinedTextFieldDefaults.colors(
@@ -742,12 +838,27 @@ fun ExpressiveCodeInput(
             )
         )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            TextButton(onClick = onEditPhone, enabled = !isLoading) {
+                Text(text = "Edit phone", fontFamily = GoogleSansRounded)
+            }
+            TextButton(onClick = onResendCode, enabled = !isLoading) {
+                Text(text = "Resend code", fontFamily = GoogleSansRounded)
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
 
         ExpressiveButton(
-            text = "Verify",
+            text = "Verify Code",
             onClick = onCheck,
-            enabled = code.isNotBlank()
+            enabled = code.length >= 3 && !isLoading,
+            loading = isLoading
         )
     }
 }
@@ -756,14 +867,20 @@ fun ExpressiveCodeInput(
 @Composable
 fun ExpressivePasswordInput(
     password: String,
+    isLoading: Boolean,
     onPasswordChanged: (String) -> Unit,
-    onCheck: () -> Unit
+    onCheck: () -> Unit,
+    onEditPhone: () -> Unit
 ) {
     val inputShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTR = 16.dp, cornerRadiusTL = 16.dp,
-        cornerRadiusBR = 16.dp, cornerRadiusBL = 16.dp,
-        smoothnessAsPercentTR = 60, smoothnessAsPercentTL = 60,
-        smoothnessAsPercentBR = 60, smoothnessAsPercentBL = 60
+        cornerRadiusTR = 16.dp,
+        cornerRadiusTL = 16.dp,
+        cornerRadiusBR = 16.dp,
+        cornerRadiusBL = 16.dp,
+        smoothnessAsPercentTR = 60,
+        smoothnessAsPercentTL = 60,
+        smoothnessAsPercentBR = 60,
+        smoothnessAsPercentBL = 60
     )
 
     Column(
@@ -772,8 +889,8 @@ fun ExpressivePasswordInput(
     ) {
         AuthStepHeader(
             icon = Icons.Rounded.Lock,
-            title = "Two-Factor Password",
-            subtitle = "Enter your 2FA password to continue"
+            title = "Two-Step Password",
+            subtitle = "Enter your Telegram password. You can still go back to fix your number."
         )
 
         Spacer(Modifier.height(24.dp))
@@ -784,14 +901,21 @@ fun ExpressivePasswordInput(
             label = { Text("Password", fontFamily = GoogleSansRounded) },
             leadingIcon = {
                 Icon(
-                    Icons.Rounded.Lock,
+                    imageVector = Icons.Rounded.Lock,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
                 )
             },
             visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(onDone = {
+                if (!isLoading) onCheck()
+            }),
             singleLine = true,
+            enabled = !isLoading,
             modifier = Modifier.fillMaxWidth(),
             shape = inputShape,
             colors = OutlinedTextFieldDefaults.colors(
@@ -802,12 +926,24 @@ fun ExpressivePasswordInput(
             )
         )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = onEditPhone, enabled = !isLoading) {
+                Text(text = "Edit phone", fontFamily = GoogleSansRounded)
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
 
         ExpressiveButton(
             text = "Verify Password",
             onClick = onCheck,
-            enabled = password.isNotBlank()
+            enabled = password.isNotBlank() && !isLoading,
+            loading = isLoading
         )
     }
 }
@@ -821,7 +957,7 @@ private fun AuthStepHeader(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(0.dp)
-    ){
+    ) {
         Box(
             modifier = Modifier
                 .size(56.dp)
@@ -840,6 +976,7 @@ private fun AuthStepHeader(
         Spacer(modifier = Modifier.width(16.dp))
 
         Column(
+            modifier = Modifier.widthIn(max = 320.dp),
             horizontalAlignment = Alignment.Start
         ) {
             Text(
@@ -868,30 +1005,39 @@ private fun AuthStepHeader(
 private fun ExpressiveButton(
     text: String,
     onClick: () -> Unit,
-    enabled: Boolean = true
+    enabled: Boolean,
+    loading: Boolean
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1f,
+        targetValue = if (isPressed && enabled) 0.96f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "buttonScale"
+        label = "telegramButtonScale"
     )
 
     MediumExtendedFloatingActionButton(
         text = {
             Text(
-                text = text,
+                text = if (loading) "Please wait..." else text,
                 fontFamily = GoogleSansRounded,
                 fontWeight = FontWeight.SemiBold
             )
         },
-        icon = { Icon(Icons.Rounded.Check, contentDescription = null) },
-        onClick = onClick,
+        icon = {
+            if (loading) {
+                LinearProgressIndicator(modifier = Modifier.width(28.dp))
+            } else {
+                Icon(imageVector = Icons.Rounded.Check, contentDescription = null)
+            }
+        },
+        onClick = {
+            if (enabled && !loading) onClick()
+        },
         expanded = true,
         shape = CircleShape,
         modifier = Modifier
@@ -905,4 +1051,91 @@ private fun ExpressiveButton(
         contentColor = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
         interactionSource = interactionSource
     )
+}
+
+private fun splitPhoneNumberForInput(phoneNumber: String): Pair<String, String> {
+    val normalized = phoneNumber.trim()
+    if (normalized.isBlank()) return "" to ""
+
+    if (!normalized.startsWith("+")) {
+        return "" to normalized.filter(Char::isDigit)
+    }
+
+    val digits = normalized.drop(1).filter(Char::isDigit)
+    if (digits.isBlank()) return "" to ""
+
+    val dialCode = guessDialCodePrefix(digits).orEmpty()
+    val localNumber = if (dialCode.isEmpty()) digits else digits.removePrefix(dialCode)
+    return dialCode to localNumber
+}
+
+private fun guessDialCodePrefix(numberWithoutPlus: String): String? {
+    return allKnownDialCodes().firstOrNull { numberWithoutPlus.startsWith(it) }
+}
+
+private fun allKnownDialCodes(): List<String> {
+    return ALL_COUNTRY_ISOS
+        .map(::getDialCodeForCountry)
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sortedByDescending { it.length }
+}
+
+private val ALL_COUNTRY_ISOS = listOf(
+    "AF", "AL", "DZ", "AD", "AO", "AR", "AM", "AU", "AT", "AZ", "BS", "BH", "BD", "BY", "BE",
+    "BZ", "BJ", "BT", "BO", "BA", "BW", "BR", "BN", "BG", "BF", "BI", "KH", "CM", "CA", "CV",
+    "CF", "TD", "CL", "CN", "CO", "KM", "CG", "CR", "HR", "CU", "CY", "CZ", "DK", "DJ", "DO",
+    "EC", "EG", "SV", "GQ", "ER", "EE", "ET", "FJ", "FI", "FR", "GA", "GM", "GE", "DE", "GH",
+    "GR", "GT", "GN", "GW", "GY", "HT", "HN", "HK", "HU", "IS", "IN", "ID", "IR", "IQ", "IE",
+    "IL", "IT", "JM", "JP", "JO", "KZ", "KE", "KP", "KR", "KW", "KG", "LA", "LV", "LB", "LS",
+    "LR", "LY", "LI", "LT", "LU", "MO", "MK", "MG", "MW", "MY", "MV", "ML", "MT", "MR", "MU",
+    "MX", "MD", "MC", "MN", "ME", "MA", "MZ", "MM", "NA", "NP", "NL", "NZ", "NI", "NE", "NG",
+    "NO", "OM", "PK", "PW", "PA", "PG", "PY", "PE", "PH", "PL", "PT", "QA", "RO", "RU", "RW",
+    "SA", "SN", "RS", "SL", "SG", "SK", "SI", "SO", "ZA", "SS", "ES", "LK", "SD", "SR", "SZ",
+    "SE", "CH", "SY", "TW", "TJ", "TZ", "TH", "TL", "TG", "TO", "TT", "TN", "TR", "TM", "UG",
+    "UA", "AE", "GB", "US", "UY", "UZ", "VU", "VE", "VN", "YE", "ZM", "ZW"
+)
+
+fun isoForDialCode(dialCode: String): String {
+    return ALL_COUNTRY_ISOS.firstOrNull { getDialCodeForCountry(it) == dialCode } ?: ""
+}
+
+fun getDialCodeForCountry(isoCode: String): String = when (isoCode.uppercase()) {
+    "AF" -> "93"; "AL" -> "355"; "DZ" -> "213"; "AD" -> "376"; "AO" -> "244"
+    "AR" -> "54"; "AM" -> "374"; "AU" -> "61"; "AT" -> "43"; "AZ" -> "994"
+    "BS" -> "1"; "BH" -> "973"; "BD" -> "880"; "BY" -> "375"; "BE" -> "32"
+    "BZ" -> "501"; "BJ" -> "229"; "BT" -> "975"; "BO" -> "591"; "BA" -> "387"
+    "BW" -> "267"; "BR" -> "55"; "BN" -> "673"; "BG" -> "359"; "BF" -> "226"
+    "BI" -> "257"; "KH" -> "855"; "CM" -> "237"; "CA" -> "1"; "CV" -> "238"
+    "CF" -> "236"; "TD" -> "235"; "CL" -> "56"; "CN" -> "86"; "CO" -> "57"
+    "KM" -> "269"; "CG" -> "242"; "CR" -> "506"; "HR" -> "385"; "CU" -> "53"
+    "CY" -> "357"; "CZ" -> "420"; "DK" -> "45"; "DJ" -> "253"; "DO" -> "1"
+    "EC" -> "593"; "EG" -> "20"; "SV" -> "503"; "GQ" -> "240"; "ER" -> "291"
+    "EE" -> "372"; "ET" -> "251"; "FJ" -> "679"; "FI" -> "358"; "FR" -> "33"
+    "GA" -> "241"; "GM" -> "220"; "GE" -> "995"; "DE" -> "49"; "GH" -> "233"
+    "GR" -> "30"; "GT" -> "502"; "GN" -> "224"; "GW" -> "245"; "GY" -> "592"
+    "HT" -> "509"; "HN" -> "504"; "HK" -> "852"; "HU" -> "36"; "IS" -> "354"
+    "IN" -> "91"; "ID" -> "62"; "IR" -> "98"; "IQ" -> "964"; "IE" -> "353"
+    "IL" -> "972"; "IT" -> "39"; "JM" -> "1"; "JP" -> "81"; "JO" -> "962"
+    "KZ" -> "7"; "KE" -> "254"; "KP" -> "850"; "KR" -> "82"; "KW" -> "965"
+    "KG" -> "996"; "LA" -> "856"; "LV" -> "371"; "LB" -> "961"; "LS" -> "266"
+    "LR" -> "231"; "LY" -> "218"; "LI" -> "423"; "LT" -> "370"; "LU" -> "352"
+    "MO" -> "853"; "MK" -> "389"; "MG" -> "261"; "MW" -> "265"; "MY" -> "60"
+    "MV" -> "960"; "ML" -> "223"; "MT" -> "356"; "MR" -> "222"; "MU" -> "230"
+    "MX" -> "52"; "MD" -> "373"; "MC" -> "377"; "MN" -> "976"; "ME" -> "382"
+    "MA" -> "212"; "MZ" -> "258"; "MM" -> "95"; "NA" -> "264"; "NP" -> "977"
+    "NL" -> "31"; "NZ" -> "64"; "NI" -> "505"; "NE" -> "227"; "NG" -> "234"
+    "NO" -> "47"; "OM" -> "968"; "PK" -> "92"; "PW" -> "680"; "PA" -> "507"
+    "PG" -> "675"; "PY" -> "595"; "PE" -> "51"; "PH" -> "63"; "PL" -> "48"
+    "PT" -> "351"; "QA" -> "974"; "RO" -> "40"; "RU" -> "7"; "RW" -> "250"
+    "SA" -> "966"; "SN" -> "221"; "RS" -> "381"; "SL" -> "232"; "SG" -> "65"
+    "SK" -> "421"; "SI" -> "386"; "SO" -> "252"; "ZA" -> "27"; "SS" -> "211"
+    "ES" -> "34"; "LK" -> "94"; "SD" -> "249"; "SR" -> "597"; "SZ" -> "268"
+    "SE" -> "46"; "CH" -> "41"; "SY" -> "963"; "TW" -> "886"; "TJ" -> "992"
+    "TZ" -> "255"; "TH" -> "66"; "TL" -> "670"; "TG" -> "228"; "TO" -> "676"
+    "TT" -> "1"; "TN" -> "216"; "TR" -> "90"; "TM" -> "993"; "UG" -> "256"
+    "UA" -> "380"; "AE" -> "971"; "GB" -> "44"; "US" -> "1"; "UY" -> "598"
+    "UZ" -> "998"; "VU" -> "678"; "VE" -> "58"; "VN" -> "84"; "YE" -> "967"
+    "ZM" -> "260"; "ZW" -> "263"
+    else -> ""
 }
