@@ -21,8 +21,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionError
@@ -32,6 +33,7 @@ import coil.request.ImageRequest
 import coil.size.Size
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import com.theveloper.pixelplay.MainActivity
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.PlayerInfo
@@ -65,7 +67,9 @@ import com.theveloper.pixelplay.ui.glancewidget.GridWidget2x2
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import com.theveloper.pixelplay.data.preferences.ThemePreference
+import com.theveloper.pixelplay.data.service.auto.AutoMediaBrowseTree
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
+import com.theveloper.pixelplay.utils.MediaItemBuilder
 
 import javax.inject.Inject
 
@@ -74,7 +78,7 @@ import javax.inject.Inject
 
 @UnstableApi
 @AndroidEntryPoint
-class MusicService : MediaSessionService() {
+class MusicService : MediaLibraryService() {
 
     @Inject
     lateinit var engine: DualPlayerEngine
@@ -88,9 +92,11 @@ class MusicService : MediaSessionService() {
     lateinit var equalizerManager: EqualizerManager
     @Inject
     lateinit var colorSchemeProcessor: ColorSchemeProcessor
+    @Inject
+    lateinit var autoMediaBrowseTree: AutoMediaBrowseTree
 
     private var favoriteSongIds = emptySet<String>()
-    private var mediaSession: MediaSession? = null
+    private var mediaSession: MediaLibraryService.MediaLibrarySession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var keepPlayingInBackground = true
     private var isManualShuffleEnabled = false
@@ -187,7 +193,7 @@ class MusicService : MediaSessionService() {
             }
         }
 
-        val callback = object : MediaSession.Callback {
+        val callback = object : MediaLibrarySession.Callback {
             override fun onConnect(
                 session: MediaSession,
                 controller: MediaSession.ControllerInfo
@@ -281,11 +287,114 @@ class MusicService : MediaSessionService() {
                 }
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+
+            // --- Android Auto: Media Library Browsing ---
+
+            override fun onGetLibraryRoot(
+                session: MediaLibrarySession,
+                browser: MediaSession.ControllerInfo,
+                params: MediaLibraryService.LibraryParams?
+            ): ListenableFuture<LibraryResult<MediaItem>> {
+                val rootItem = MediaItem.Builder()
+                    .setMediaId(AutoMediaBrowseTree.ROOT_ID)
+                    .setMediaMetadata(
+                        androidx.media3.common.MediaMetadata.Builder()
+                            .setTitle("PixelPlay")
+                            .setIsBrowsable(true)
+                            .setIsPlayable(false)
+                            .setMediaType(androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                            .build()
+                    )
+                    .build()
+                return Futures.immediateFuture(LibraryResult.ofItem(rootItem, params))
+            }
+
+            override fun onGetChildren(
+                session: MediaLibrarySession,
+                browser: MediaSession.ControllerInfo,
+                parentId: String,
+                page: Int,
+                pageSize: Int,
+                params: MediaLibraryService.LibraryParams?
+            ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
+                return serviceScope.future {
+                    try {
+                        val children = autoMediaBrowseTree.getChildren(parentId, page, pageSize)
+                        LibraryResult.ofItemList(children, params)
+                    } catch (e: Exception) {
+                        Timber.tag(TAG).e(e, "onGetChildren failed for parentId=$parentId")
+                        LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN)
+                    }
+                }
+            }
+
+            override fun onGetItem(
+                session: MediaLibrarySession,
+                browser: MediaSession.ControllerInfo,
+                mediaId: String
+            ): ListenableFuture<LibraryResult<MediaItem>> {
+                return serviceScope.future {
+                    try {
+                        val item = autoMediaBrowseTree.getItem(mediaId)
+                        if (item != null) {
+                            LibraryResult.ofItem(item, null)
+                        } else {
+                            LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                        }
+                    } catch (e: Exception) {
+                        Timber.tag(TAG).e(e, "onGetItem failed for mediaId=$mediaId")
+                        LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN)
+                    }
+                }
+            }
+
+            override fun onSearch(
+                session: MediaLibrarySession,
+                browser: MediaSession.ControllerInfo,
+                query: String,
+                params: MediaLibraryService.LibraryParams?
+            ): ListenableFuture<LibraryResult<Void>> {
+                // Signal that search is supported; results delivered via onGetSearchResult
+                return Futures.immediateFuture(LibraryResult.ofVoid())
+            }
+
+            override fun onGetSearchResult(
+                session: MediaLibrarySession,
+                browser: MediaSession.ControllerInfo,
+                query: String,
+                page: Int,
+                pageSize: Int,
+                params: MediaLibraryService.LibraryParams?
+            ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
+                return serviceScope.future {
+                    try {
+                        val results = autoMediaBrowseTree.search(query)
+                        LibraryResult.ofItemList(results, params)
+                    } catch (e: Exception) {
+                        Timber.tag(TAG).e(e, "onGetSearchResult failed for query=$query")
+                        LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN)
+                    }
+                }
+            }
+
+            override fun onAddMediaItems(
+                mediaSession: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                mediaItems: MutableList<MediaItem>
+            ): ListenableFuture<MutableList<MediaItem>> {
+                return serviceScope.future {
+                    val resolvedItems = mediaItems.mapNotNull { requestedItem ->
+                        val songId = requestedItem.mediaId
+                        val song = musicRepository.getSong(songId).first()
+                        song?.let { MediaItemBuilder.build(it) }
+                    }.toMutableList()
+                    resolvedItems
+                }
+            }
         }
 
-        mediaSession = MediaSession.Builder(this, engine.masterPlayer)
+        mediaSession = MediaLibrarySession.Builder(this, engine.masterPlayer, callback)
             .setSessionActivity(getOpenAppPendingIntent())
-            .setCallback(callback)
             .setBitmapLoader(CoilBitmapLoader(this))
             .build()
 
@@ -427,7 +536,7 @@ class MusicService : MediaSessionService() {
         super.onTaskRemoved(rootIntent)
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onDestroy() {
         mediaSession?.run {
@@ -865,6 +974,21 @@ class MusicService : MediaSessionService() {
 
         // Restore normal repeat mode (OFF)
         engine.masterPlayer.repeatMode = Player.REPEAT_MODE_OFF
+    }
+
+    /**
+     * Bridges a suspend block into a [ListenableFuture] for Media3 callback methods.
+     */
+    private fun <T> CoroutineScope.future(block: suspend () -> T): ListenableFuture<T> {
+        val future = SettableFuture.create<T>()
+        launch(Dispatchers.IO) {
+            try {
+                future.set(block())
+            } catch (e: Exception) {
+                future.setException(e)
+            }
+        }
+        return future
     }
 
 }

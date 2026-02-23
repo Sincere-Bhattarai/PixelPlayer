@@ -103,7 +103,7 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="android.media.browse.MediaBrowserService" />
-                <action android:name="androidx.media3.session.MediaSessionService"/>
+                <action android:name="androidx.media3.session.MediaLibraryService"/>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.APP_MUSIC" />
