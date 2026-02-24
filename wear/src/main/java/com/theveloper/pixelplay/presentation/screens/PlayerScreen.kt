@@ -2,7 +2,14 @@ package com.theveloper.pixelplay.presentation.screens
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,38 +24,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.wear.compose.material.Icon
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.PositionIndicator
-import androidx.wear.compose.material.Text
-import com.google.android.horologist.compose.layout.ScalingLazyColumn
-import com.google.android.horologist.compose.layout.rememberResponsiveColumnState
-import com.theveloper.pixelplay.presentation.viewmodel.WearPlayerViewModel
-import com.theveloper.pixelplay.shared.WearPlayerState
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Favorite
@@ -61,8 +41,45 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.wear.compose.material.HorizontalPageIndicator
+import androidx.wear.compose.material.Icon
+import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.PageIndicatorState
+import androidx.wear.compose.material.PositionIndicator
+import androidx.wear.compose.material.Text
+import com.google.android.horologist.compose.layout.ScalingLazyColumn
+import com.google.android.horologist.compose.layout.rememberResponsiveColumnState
+import com.theveloper.pixelplay.presentation.shapes.RoundedStarShape
 import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
+import com.theveloper.pixelplay.presentation.viewmodel.WearPlayerViewModel
+import com.theveloper.pixelplay.shared.WearPlayerState
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
 
 @Composable
 fun PlayerScreen(
@@ -103,16 +120,6 @@ private fun PlayerContent(
     onBrowseClick: () -> Unit,
     onVolumeClick: () -> Unit,
 ) {
-    val columnState = rememberResponsiveColumnState(
-        contentPadding = {
-            PaddingValues(
-                start = 0.dp,
-                end = 0.dp,
-                top = 2.dp,
-                bottom = 10.dp,
-            )
-        },
-    )
     val palette = LocalWearPalette.current
     val background = Brush.radialGradient(
         colors = listOf(
@@ -122,11 +129,100 @@ private fun PlayerContent(
         ),
     )
 
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pageIndicatorState: PageIndicatorState = remember(pagerState) {
+        object : PageIndicatorState {
+            override val pageOffset: Float
+                get() = pagerState.currentPageOffsetFraction
+            override val selectedPage: Int
+                get() = pagerState.currentPage
+            override val pageCount: Int
+                get() = pagerState.pageCount
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(background),
     ) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 1,
+        ) { page ->
+            when (page) {
+                0 -> {
+                    MainPlayerPage(
+                        clock = clock,
+                        state = state,
+                        isPhoneConnected = isPhoneConnected,
+                        onTogglePlayPause = onTogglePlayPause,
+                        onNext = onNext,
+                        onPrevious = onPrevious,
+                        onToggleFavorite = onToggleFavorite,
+                        onToggleShuffle = onToggleShuffle,
+                        onCycleRepeat = onCycleRepeat,
+                    )
+                }
+
+                else -> {
+                    UtilityPage(
+                        enabled = true,
+                        onBrowseClick = onBrowseClick,
+                        onVolumeClick = onVolumeClick,
+                    )
+                }
+            }
+        }
+
+        HorizontalPageIndicator(
+            pageIndicatorState = pageIndicatorState,
+            selectedColor = palette.textPrimary,
+            unselectedColor = palette.textPrimary.copy(alpha = 0.35f),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun MainPlayerPage(
+    clock: String,
+    state: WearPlayerState,
+    isPhoneConnected: Boolean,
+    onTogglePlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+) {
+    val palette = LocalWearPalette.current
+    val columnState = rememberResponsiveColumnState(
+        contentPadding = {
+            PaddingValues(
+                start = 0.dp,
+                end = 0.dp,
+                top = 2.dp,
+                bottom = 20.dp,
+            )
+        },
+    )
+
+    val trackProgressTarget = if (state.totalDurationMs > 0L) {
+        (state.currentPositionMs.toFloat() / state.totalDurationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val trackProgress by animateFloatAsState(
+        targetValue = trackProgressTarget,
+        animationSpec = tween(durationMillis = 280),
+        label = "trackProgress",
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
         ScalingLazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -136,17 +232,12 @@ private fun PlayerContent(
             item {
                 Text(
                     text = clock,
-                    style = MaterialTheme.typography.body1.copy(
-                        fontSize = 20.sp
-                    ),
+                    style = MaterialTheme.typography.body1.copy(fontSize = 20.sp),
                     color = palette.textPrimary,
-                    modifier = Modifier.padding(top = 0.dp),
                 )
             }
 
-            item {
-                Spacer(modifier = Modifier.height(12.dp))
-            }
+            item { Spacer(modifier = Modifier.height(10.dp)) }
 
             item {
                 HeaderBlock(
@@ -155,20 +246,21 @@ private fun PlayerContent(
                 )
             }
 
-            item { Spacer(modifier = Modifier.height(2.dp)) }
+            item { Spacer(modifier = Modifier.height(4.dp)) }
 
             item {
                 MainControlsRow(
                     isPlaying = state.isPlaying,
                     isEmpty = state.isEmpty,
                     enabled = isPhoneConnected,
+                    trackProgress = trackProgress,
                     onTogglePlayPause = onTogglePlayPause,
                     onNext = onNext,
                     onPrevious = onPrevious,
                 )
             }
 
-            item { Spacer(modifier = Modifier.height(6.dp)) }
+            item { Spacer(modifier = Modifier.height(8.dp)) }
 
             item {
                 SecondaryControlsRow(
@@ -185,16 +277,6 @@ private fun PlayerContent(
                 )
             }
 
-            item { Spacer(modifier = Modifier.height(2.dp)) }
-
-            item {
-                UtilityActionRow(
-                    enabled = true,
-                    onBrowseClick = onBrowseClick,
-                    onVolumeClick = onVolumeClick,
-                )
-            }
-
             if (!isPhoneConnected) {
                 item {
                     Text(
@@ -204,7 +286,7 @@ private fun PlayerContent(
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 4.dp),
+                            .padding(top = 6.dp),
                     )
                 }
             }
@@ -214,7 +296,7 @@ private fun PlayerContent(
             scalingLazyListState = columnState.state,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 2.dp),
+                .padding(end = 2.dp, bottom = 8.dp),
         )
     }
 }
@@ -262,6 +344,7 @@ private fun MainControlsRow(
     isPlaying: Boolean,
     isEmpty: Boolean,
     enabled: Boolean,
+    trackProgress: Float,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -278,8 +361,8 @@ private fun MainControlsRow(
             contentDescription = "Previous",
             enabled = enabled,
             onClick = onPrevious,
-            width = 48.dp,
-            height = 40.dp,
+            width = 44.dp,
+            height = 54.dp,
         )
 
         Spacer(modifier = Modifier.width(4.dp))
@@ -287,6 +370,7 @@ private fun MainControlsRow(
         CenterPlayButton(
             isPlaying = isPlaying,
             enabled = enabled && !isEmpty,
+            trackProgress = trackProgress,
             onClick = onTogglePlayPause,
         )
 
@@ -297,8 +381,8 @@ private fun MainControlsRow(
             contentDescription = "Next",
             enabled = enabled,
             onClick = onNext,
-            width = 48.dp,
-            height = 40.dp,
+            width = 44.dp,
+            height = 54.dp,
         )
     }
 }
@@ -315,12 +399,11 @@ private fun FlattenedControlButton(
     val palette = LocalWearPalette.current
     val container = if (enabled) palette.controlContainer else palette.controlDisabledContainer
     val tint = if (enabled) palette.controlContent else palette.controlDisabledContent
-    val shape = CircleShape
 
     Box(
         modifier = Modifier
             .size(width = width, height = height)
-            .clip(shape)
+            .clip(CircleShape)
             .background(container)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -329,7 +412,7 @@ private fun FlattenedControlButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = tint,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(28.dp),
         )
     }
 }
@@ -338,23 +421,33 @@ private fun FlattenedControlButton(
 private fun CenterPlayButton(
     isPlaying: Boolean,
     enabled: Boolean,
+    trackProgress: Float,
     onClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
-    val animatedCorner by animateDpAsState(
-        targetValue = if (isPlaying) 18.dp else 32.dp,
+
+    val animatedCurve by animateFloatAsState(
+        targetValue = if (isPlaying) 0.08f else 0.00f,
         animationSpec = spring(),
-        label = "playCorner",
+        label = "playStarCurve",
     )
-    val animatedWidth by animateDpAsState(
+    val infiniteTransition = rememberInfiniteTransition(label = "playStarSpin")
+    val spinningRotation by infiniteTransition.animateFloat(
+        initialValue = 360f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = 13800,
+                easing = LinearEasing,
+            ),
+        ),
+        label = "playStarRotationInfinite",
+    )
+    val animatedRotation = if (isPlaying) spinningRotation else 0f
+    val animatedSize by animateDpAsState(
         targetValue = if (isPlaying) 60.dp else 56.dp,
         animationSpec = spring(),
-        label = "playWidth",
-    )
-    val animatedHeight by animateDpAsState(
-        targetValue = if (isPlaying) 50.dp else 56.dp,
-        animationSpec = spring(),
-        label = "playHeight",
+        label = "playButtonSize",
     )
     val container by animateColorAsState(
         targetValue = if (enabled) palette.controlContainer else palette.controlDisabledContainer,
@@ -367,20 +460,62 @@ private fun CenterPlayButton(
         label = "playTint",
     )
 
+    val ringProgress = trackProgress.coerceIn(0f, 1f)
+
     Box(
-        modifier = Modifier
-            .size(width = animatedWidth, height = animatedHeight)
-            .clip(RoundedCornerShape(animatedCorner))
-            .background(container)
-            .clickable(enabled = enabled, onClick = onClick),
+        modifier = Modifier.size(animatedSize + 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-            contentDescription = if (isPlaying) "Pause" else "Play",
-            tint = tint,
-            modifier = Modifier.size(32.dp),
-        )
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 4.dp.toPx()
+            val diameter = size.minDimension - strokeWidth
+            val arcTopLeft = Offset(
+                x = (size.width - diameter) / 2f,
+                y = (size.height - diameter) / 2f,
+            )
+            val arcSize = Size(diameter, diameter)
+
+            drawArc(
+                color = palette.chipContainer.copy(alpha = 0.62f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = arcTopLeft,
+                size = arcSize,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+            )
+            drawArc(
+                color = palette.controlContainer.copy(alpha = if (enabled) 1f else 0.45f),
+                startAngle = -90f,
+                sweepAngle = 360f * ringProgress,
+                useCenter = false,
+                topLeft = arcTopLeft,
+                size = arcSize,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .size(animatedSize)
+                .clip(
+                    RoundedStarShape(
+                        sides = 8,
+                        curve = animatedCurve.toDouble(),
+                        rotation = animatedRotation,
+                    )
+                )
+                .background(container)
+                .clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                tint = tint,
+                modifier = Modifier.size(30.dp),
+            )
+        }
     }
 }
 
@@ -478,25 +613,30 @@ private fun SecondaryActionButton(
 }
 
 @Composable
-private fun UtilityActionRow(
+private fun UtilityPage(
     enabled: Boolean,
     onBrowseClick: () -> Unit,
     onVolumeClick: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        UtilityActionButton(
+        UtilityPillButton(
             icon = Icons.Rounded.LibraryMusic,
-            contentDescription = "Library",
+            label = "Library",
             enabled = enabled,
             onClick = onBrowseClick,
         )
-        UtilityActionButton(
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        UtilityPillButton(
             icon = Icons.AutoMirrored.Rounded.VolumeUp,
-            contentDescription = "Volume",
+            label = "Volume",
             enabled = enabled,
             onClick = onVolumeClick,
         )
@@ -504,28 +644,40 @@ private fun UtilityActionRow(
 }
 
 @Composable
-private fun UtilityActionButton(
+private fun UtilityPillButton(
     icon: ImageVector,
-    contentDescription: String,
+    label: String,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
     val container = if (enabled) palette.chipContainer else palette.controlDisabledContainer.copy(alpha = 0.35f)
     val tint = if (enabled) palette.chipContent else palette.controlDisabledContent
-    Box(
+
+    Row(
         modifier = Modifier
-            .size(width = 54.dp, height = 42.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .fillMaxWidth()
+            .widthIn(max = 190.dp)
+            .height(50.dp)
+            .clip(RoundedCornerShape(25.dp))
             .background(container)
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = contentDescription,
+            contentDescription = label,
             tint = tint,
             modifier = Modifier.size(22.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = label,
+            color = tint,
+            style = MaterialTheme.typography.button,
+            maxLines = 1,
         )
     }
 }

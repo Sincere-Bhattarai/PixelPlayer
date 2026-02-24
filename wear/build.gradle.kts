@@ -79,6 +79,7 @@ dependencies {
     // Compose core
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.foundation)
 
     // Serialization
     implementation(libs.kotlinx.serialization.json)
