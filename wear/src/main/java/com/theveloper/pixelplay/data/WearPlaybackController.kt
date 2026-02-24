@@ -72,6 +72,16 @@ class WearPlaybackController @Inject constructor(
     fun volumeUp() = sendVolumeCommand(WearVolumeCommand(WearVolumeCommand.UP))
     fun volumeDown() = sendVolumeCommand(WearVolumeCommand(WearVolumeCommand.DOWN))
 
+    /** Play a song within its context queue (album, artist, playlist, etc.) */
+    fun playFromContext(songId: String, contextType: String, contextId: String?) = sendCommand(
+        WearPlaybackCommand(
+            action = WearPlaybackCommand.PLAY_FROM_CONTEXT,
+            songId = songId,
+            contextType = contextType,
+            contextId = contextId,
+        )
+    )
+
     private suspend fun sendMessageToPhone(path: String, data: ByteArray) {
         try {
             val nodes = nodeClient.connectedNodes.await()

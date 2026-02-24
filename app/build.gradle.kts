@@ -310,6 +310,7 @@ dependencies {
     // Wear OS Data Layer
     implementation(project(":shared"))
     implementation(libs.play.services.wearable)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // Telegram TDLib
     implementation(libs.tdlib)

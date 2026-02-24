@@ -22,4 +22,10 @@ object WearDataPaths {
 
     /** Key for timestamp to force DataItem updates */
     const val KEY_TIMESTAMP = "timestamp"
+
+    /** Message path for library browse requests (watch -> phone) */
+    const val BROWSE_REQUEST = "/browse_request"
+
+    /** Message path for library browse responses (phone -> watch) */
+    const val BROWSE_RESPONSE = "/browse_response"
 }

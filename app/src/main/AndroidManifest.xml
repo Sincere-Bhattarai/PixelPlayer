@@ -229,6 +229,10 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/volume_command" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/browse_request" />
             </intent-filter>
         </service>
 

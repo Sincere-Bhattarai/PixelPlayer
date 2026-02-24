@@ -9,10 +9,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class WearPlaybackCommand(
     val action: String,
-    /** Optional song ID for PLAY_ITEM action */
+    /** Optional song ID for PLAY_ITEM / PLAY_FROM_CONTEXT actions */
     val songId: String? = null,
     /** Optional target state for idempotent toggle actions (favorite/shuffle). */
     val targetEnabled: Boolean? = null,
+    /** Context type for PLAY_FROM_CONTEXT: "album", "artist", "playlist", "favorites", "all_songs" */
+    val contextType: String? = null,
+    /** Context ID for PLAY_FROM_CONTEXT: albumId, artistId, playlistId */
+    val contextId: String? = null,
 ) {
     companion object {
         const val PLAY = "play"
@@ -25,5 +29,7 @@ data class WearPlaybackCommand(
         const val CYCLE_REPEAT = "cycle_repeat"
         /** Play a specific song by ID */
         const val PLAY_ITEM = "play_item"
+        /** Play a song within a context (album/artist/playlist queue) */
+        const val PLAY_FROM_CONTEXT = "play_from_context"
     }
 }

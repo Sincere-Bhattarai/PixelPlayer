@@ -50,7 +50,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 
 @Composable
 fun PlayerScreen(
+    onBrowseClick: () -> Unit = {},
     viewModel: WearPlayerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.playerState.collectAsState()
@@ -77,6 +78,7 @@ fun PlayerScreen(
         onToggleFavorite = viewModel::toggleFavorite,
         onToggleShuffle = viewModel::toggleShuffle,
         onCycleRepeat = viewModel::cycleRepeat,
+        onBrowseClick = onBrowseClick,
     )
 }
 
@@ -91,6 +93,7 @@ private fun PlayerContent(
     onToggleFavorite: () -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
+    onBrowseClick: () -> Unit,
 ) {
     val columnState = rememberResponsiveColumnState()
     val background = Brush.radialGradient(
@@ -149,6 +152,26 @@ private fun PlayerContent(
                 onToggleShuffle = onToggleShuffle,
                 onCycleRepeat = onCycleRepeat,
             )
+        }
+
+        item { Spacer(modifier = Modifier.height(2.dp)) }
+
+        item {
+            Box(
+                modifier = Modifier
+                    .size(width = 54.dp, height = 42.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFFD8CEF3).copy(alpha = 0.25f))
+                    .clickable(onClick = onBrowseClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.LibraryMusic,
+                    contentDescription = "Library",
+                    tint = Color(0xFFE8E0FF),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
 
         if (!isPhoneConnected) {

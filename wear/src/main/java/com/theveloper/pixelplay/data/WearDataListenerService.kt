@@ -8,9 +8,11 @@ import com.google.android.gms.wearable.DataEvent
 import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMap
 import com.google.android.gms.wearable.DataMapItem
+import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.theveloper.pixelplay.presentation.WearMainActivity
+import com.theveloper.pixelplay.shared.WearBrowseResponse
 import com.theveloper.pixelplay.shared.WearDataPaths
 import com.theveloper.pixelplay.shared.WearPlayerState
 import dagger.hilt.android.AndroidEntryPoint
@@ -34,6 +36,9 @@ class WearDataListenerService : WearableListenerService() {
 
     @Inject
     lateinit var stateRepository: WearStateRepository
+
+    @Inject
+    lateinit var libraryRepository: WearLibraryRepository
 
     private val json = Json { ignoreUnknownKeys = true }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -154,6 +159,31 @@ class WearDataListenerService : WearableListenerService() {
             ?.topActivity
             ?.className
         return topActivityClassName == WearMainActivity::class.java.name
+    }
+
+    /**
+     * Receives message responses from the phone (e.g., browse responses).
+     * DataItem changes are handled by [onDataChanged]; this handles MessageClient responses.
+     */
+    override fun onMessageReceived(messageEvent: MessageEvent) {
+        when (messageEvent.path) {
+            WearDataPaths.BROWSE_RESPONSE -> {
+                try {
+                    val responseJson = String(messageEvent.data, Charsets.UTF_8)
+                    val response = json.decodeFromString<WearBrowseResponse>(responseJson)
+                    libraryRepository.onBrowseResponseReceived(response)
+                    Timber.tag(TAG).d(
+                        "Received browse response: ${response.items.size} items, " +
+                            "requestId=${response.requestId}"
+                    )
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to process browse response")
+                }
+            }
+            else -> {
+                Timber.tag(TAG).d("Ignoring message on path: ${messageEvent.path}")
+            }
+        }
     }
 
     override fun onDestroy() {
