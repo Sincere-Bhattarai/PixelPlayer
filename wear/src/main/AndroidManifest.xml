@@ -22,6 +22,9 @@
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="false" />
+        <meta-data
+            android:name="com.google.android.wearable.notificationBridgeMode"
+            android:value="NO_BRIDGING" />
 
         <activity
             android:name=".presentation.WearMainActivity"
@@ -31,6 +34,14 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.wearable.action.MEDIA_CONTROLS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.theveloper.pixelplay.action.OPEN_PLAYER" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 

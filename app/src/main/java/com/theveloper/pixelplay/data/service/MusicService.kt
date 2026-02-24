@@ -34,7 +34,6 @@ import coil.size.Size
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
-import com.theveloper.pixelplay.MainActivity
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.PlayerInfo
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
@@ -70,6 +69,7 @@ import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.data.service.auto.AutoMediaBrowseTree
 import com.theveloper.pixelplay.data.service.wear.WearStatePublisher
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
+import com.theveloper.pixelplay.shared.WearIntents
 import com.theveloper.pixelplay.utils.MediaItemBuilder
 
 import javax.inject.Inject
@@ -115,6 +115,24 @@ class MusicService : MediaLibraryService() {
         private const val TAG = "MusicService_PixelPlay"
         const val NOTIFICATION_ID = 101
         const val ACTION_SLEEP_TIMER_EXPIRED = "com.theveloper.pixelplay.ACTION_SLEEP_TIMER_EXPIRED"
+
+        private const val APP_PACKAGE_PREFIX = "com.theveloper.pixelplay"
+        private val BLOCKED_WEAR_CONTROLLER_PREFIXES = listOf(
+            "android.media.session.MediaController",
+            "com.google.android.wearable",
+            "com.google.android.clockwork",
+            "com.google.android.apps.wearable",
+            "com.google.android.apps.wear.companion",
+            "com.samsung.android.app.watchmanager",
+            "com.mobvoi.wear",
+        )
+        private val WEAR_HINT_KEY_MARKERS = listOf(
+            "wear",
+            "clockwork",
+            "companion",
+            "node",
+            "remote_device",
+        )
     }
 
     override fun onCreate() {
@@ -201,6 +219,24 @@ class MusicService : MediaLibraryService() {
                 session: MediaSession,
                 controller: MediaSession.ControllerInfo
             ): MediaSession.ConnectionResult {
+                val controllerPackage = controller.packageName
+                val hintKeys = controller.connectionHints.keySet().joinToString(",")
+                Timber.tag(TAG).d(
+                    "onConnect from package=%s uid=%s trusted=%s version=%s hints=[%s]",
+                    controllerPackage,
+                    controller.uid,
+                    controller.isTrusted,
+                    controller.controllerVersion,
+                    hintKeys
+                )
+                if (shouldRejectWearController(controller)) {
+                    Timber.tag(TAG).i(
+                        "Rejecting Wear system controller connection from package=%s",
+                        controllerPackage
+                    )
+                    return MediaSession.ConnectionResult.reject()
+                }
+
                 val defaultResult = super.onConnect(session, controller)
                 val customCommands = listOf(
                     MusicNotificationProvider.CUSTOM_COMMAND_LIKE,
@@ -442,6 +478,31 @@ class MusicService : MediaLibraryService() {
         }
     }
 
+    private fun shouldRejectWearController(controller: MediaSession.ControllerInfo): Boolean {
+        val controllerPackage = controller.packageName
+        if (controllerPackage.startsWith(APP_PACKAGE_PREFIX)) {
+            return false
+        }
+        val blockedByPackage = BLOCKED_WEAR_CONTROLLER_PREFIXES.any { prefix ->
+            controllerPackage.startsWith(prefix)
+        }
+        if (blockedByPackage) {
+            return true
+        }
+
+        val hasWearHints = controller.connectionHints.keySet().any { key ->
+            WEAR_HINT_KEY_MARKERS.any { marker ->
+                key.contains(marker, ignoreCase = true)
+            }
+        }
+        if (!hasWearHints) {
+            return false
+        }
+        // If hints identify a Wear/remote controller and it's not our app package,
+        // reject to avoid the default Wear system media player hijacking the session.
+        return true
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.action?.let { action ->
             val player = mediaSession?.player ?: return@let
@@ -494,7 +555,9 @@ class MusicService : MediaLibraryService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             val player = engine.masterPlayer
             Timber.tag(TAG).d("onIsPlayingChanged: $isPlaying. Duration: ${player.duration}, Seekable: ${player.isCurrentMediaItemSeekable}")
-            requestWidgetFullUpdate()
+            // Push state immediately so the watch can foreground PixelPlay before
+            // system media surfaces take over.
+            requestWidgetFullUpdate(force = true)
             mediaSession?.let { refreshMediaSessionUi(it) }
         }
         
@@ -575,8 +638,10 @@ class MusicService : MediaLibraryService() {
     }
 
     private fun getOpenAppPendingIntent(): PendingIntent {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        val intent = Intent(WearIntents.ACTION_OPEN_PLAYER).apply {
+            `package` = packageName
+            addCategory(Intent.CATEGORY_DEFAULT)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("ACTION_SHOW_PLAYER", true) // Signal to MainActivity to show the player
         }
         return PendingIntent.getActivity(
