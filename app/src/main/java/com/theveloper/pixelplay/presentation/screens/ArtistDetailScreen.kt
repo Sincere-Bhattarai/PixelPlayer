@@ -85,6 +85,8 @@ import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
 import kotlinx.coroutines.launch
 import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
 import kotlin.math.roundToInt
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextGeometricTransform
@@ -108,6 +110,14 @@ fun ArtistDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+    
+    // Optimization: Defer heavy list rendering until transition is finished
+    var isTransitionFinished by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(600)
+        isTransitionFinished = true
+    }
+
     val lazyListState = rememberLazyListState()
     val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
@@ -149,7 +159,7 @@ fun ArtistDetailScreen(
     val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }
 
     val topBarHeight = remember { Animatable(maxTopBarHeightPx) }
-    val collapseFraction by remember {
+    val collapseFraction by remember(minTopBarHeightPx, maxTopBarHeightPx) {
         derivedStateOf {
             1f - ((topBarHeight.value - minTopBarHeightPx) / (maxTopBarHeightPx - minTopBarHeightPx)).coerceIn(0f, 1f)
         }
@@ -265,19 +275,22 @@ fun ArtistDetailScreen(
 
                     LazyColumn(
                         state = lazyListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset { IntOffset(0, topBarHeight.value.toInt()) },
                         contentPadding = PaddingValues(
-                            top = currentTopBarHeightDp,
                             start = 16.dp,
                             end = if (showScrollBar) 24.dp else 16.dp,
                             bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 8.dp
-                        ),
-                        modifier = Modifier.fillMaxSize()
+                        )
                     ) {
                         albumSections.forEachIndexed { index, section ->
                             if (section.songs.isEmpty()) return@forEachIndexed
 
                             val sectionKey = section.collapseKey()
                             val isExpanded = expandedSections[sectionKey] ?: true
+                            
+                            val sectionSongs = if (isTransitionFinished) section.songs else section.songs.take(5)
 
                             item(key = "${sectionKey}_header") {
                                 CollapsibleAlbumSectionHeader(
@@ -310,7 +323,7 @@ fun ArtistDetailScreen(
                             }
 
                             itemsIndexed(
-                                items = section.songs,
+                                items = sectionSongs,
                                 key = { songIndex, song -> "${sectionKey}_song_${song.id}_$songIndex" }
                             ) { songIndex, song ->
                                 AnimatedVisibility(

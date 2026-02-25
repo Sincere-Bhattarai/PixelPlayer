@@ -25,6 +25,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
@@ -79,7 +80,9 @@ fun ScreenWrapper(
     // If I am BACKGROUND (myIndex < topIndex) -> Dim.
     // If I am TOP (myIndex == topIndex) -> Clear.
     // If I am EXITING (myIndex > topIndex, effectively in front during pop) -> Clear.
-    val shouldDim = myIndex != -1 && topIndex != -1 && myIndex < topIndex
+    val shouldDim = remember(backStack, myIndex, topIndex) {
+        myIndex != -1 && topIndex != -1 && myIndex < topIndex
+    }
 
     // Declarative Animations
     // Radius: If NOT Resumed -> 32dp. (Background OR Popped)
@@ -101,7 +104,18 @@ fun ScreenWrapper(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(cornerRadius.dp)) // Clip first
+            .run {
+                // Optimization: Avoid expensive clipping if the radius is effectively zero
+                // Using graphicsLayer is more performant than .clip() during animations
+                if (cornerRadius > 0.5f) {
+                    graphicsLayer {
+                        this.shape = RoundedCornerShape(cornerRadius.dp)
+                        this.clip = true
+                    }
+                } else {
+                    this
+                }
+            }
             .background(MaterialTheme.colorScheme.background)
     ) {
         content()
