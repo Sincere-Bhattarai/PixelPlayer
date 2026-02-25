@@ -273,11 +273,13 @@ fun SongListScreen(
                     val menuSongTransfer = activeTransfers.values.firstOrNull { it.songId == menuSong.id }
                     val menuSongIsTransferring = menuSongTransfer != null &&
                         menuSongTransfer.status == WearTransferProgress.STATUS_TRANSFERRING
+                    val menuSongCanSaveToWatch = menuSong.canSaveToWatch
 
                     SongActionScreen(
                         song = menuSong,
                         isDownloaded = menuSongIsDownloaded,
                         isTransferring = menuSongIsTransferring,
+                        canSaveToWatch = menuSongCanSaveToWatch,
                         onDismiss = { selectedSongForMenu = null },
                         onPlayNow = {
                             viewModel.playFromContext(
@@ -305,8 +307,12 @@ fun SongListScreen(
                             selectedSongForMenu = null
                         },
                         onSaveToWatch = {
-                            selectedSongForMenu = null
-                            selectedSongForTransferConfirmation = menuSong
+                            if (menuSongCanSaveToWatch) {
+                                selectedSongForMenu = null
+                                selectedSongForTransferConfirmation = menuSong
+                            } else {
+                                selectedSongForMenu = null
+                            }
                         },
                     )
                 }
@@ -427,6 +433,7 @@ private fun SongActionScreen(
     song: WearLibraryItem,
     isDownloaded: Boolean,
     isTransferring: Boolean,
+    canSaveToWatch: Boolean,
     onDismiss: () -> Unit,
     onPlayNow: () -> Unit,
     onPlayNext: () -> Unit,
@@ -439,8 +446,8 @@ private fun SongActionScreen(
     val playNowColor = palette.shuffleActive.copy(alpha = 0.38f)
     val playNextColor = palette.repeatActive.copy(alpha = 0.38f)
     val addToQueueColor = palette.controlContainer.copy(alpha = 0.56f)
-    val saveToWatchColor = if (isDownloaded || isTransferring) {
-        palette.controlDisabledContainer.copy(alpha = 0.45f)
+    val saveToWatchColor = if (!canSaveToWatch || isDownloaded || isTransferring) {
+        palette.controlDisabledContainer
     } else {
         palette.favoriteActive.copy(alpha = 0.40f)
     }
@@ -515,18 +522,20 @@ private fun SongActionScreen(
                 )
             }
 
-            item {
-                SongActionChip(
-                    icon = Icons.Rounded.Download,
-                    label = when {
-                        isDownloaded -> "Saved on watch"
-                        isTransferring -> "Saving..."
-                        else -> "Save to watch"
-                    },
-                    backgroundColor = saveToWatchColor,
-                    enabled = !isDownloaded && !isTransferring,
-                    onClick = onSaveToWatch,
-                )
+            if (canSaveToWatch || isDownloaded || isTransferring) {
+                item {
+                    SongActionChip(
+                        icon = Icons.Rounded.Download,
+                        label = when {
+                            isDownloaded -> "Saved on watch"
+                            isTransferring -> "Saving..."
+                            else -> "Save to watch"
+                        },
+                        backgroundColor = saveToWatchColor,
+                        enabled = canSaveToWatch && !isDownloaded && !isTransferring,
+                        onClick = onSaveToWatch,
+                    )
+                }
             }
 
             item {
@@ -672,7 +681,7 @@ private fun SongActionChip(
         enabled = enabled,
         colors = ChipDefaults.chipColors(
             backgroundColor = if (enabled) backgroundColor
-            else palette.controlDisabledContainer.copy(alpha = 0.40f),
+            else palette.controlDisabledContainer,
             contentColor = contentColor,
         ),
         modifier = Modifier.fillMaxWidth(),

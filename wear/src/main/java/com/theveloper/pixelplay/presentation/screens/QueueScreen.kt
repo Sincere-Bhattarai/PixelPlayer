@@ -308,7 +308,7 @@ private fun QueueShortcutButton(
     val palette = LocalWearPalette.current
     val container by animateColorAsState(
         targetValue = when {
-            !enabled -> palette.controlDisabledContainer.copy(alpha = 0.42f)
+            !enabled -> palette.controlDisabledContainer
             active -> activeColor.copy(alpha = 0.86f)
             else -> palette.chipContainer
         },

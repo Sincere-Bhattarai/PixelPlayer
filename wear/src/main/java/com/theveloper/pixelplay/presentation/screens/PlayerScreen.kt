@@ -1052,7 +1052,7 @@ private fun SecondaryActionButton(
     val activeContainerColor = activeColor.copy(alpha = 0.84f)
     val container by animateColorAsState(
         targetValue = when {
-            !enabled -> palette.controlDisabledContainer.copy(alpha = 0.42f)
+            !enabled -> palette.controlDisabledContainer
             active -> activeContainerColor
             else -> palette.chipContainer
         },
@@ -1217,7 +1217,7 @@ private fun UtilityPillButton(
     onClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
-    val container = if (enabled) palette.chipContainer else palette.controlDisabledContainer.copy(alpha = 0.35f)
+    val container = if (enabled) palette.chipContainer else palette.controlDisabledContainer
     val tint = if (enabled) palette.chipContent else palette.controlDisabledContent
 
     Row(

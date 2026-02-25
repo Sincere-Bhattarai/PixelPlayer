@@ -12,7 +12,9 @@ import com.theveloper.pixelplay.shared.WearTransferProgress
 import com.theveloper.pixelplay.shared.WearTransferRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -104,9 +106,13 @@ class WearTransferRepository @Inject constructor(
     /** Artwork bytes received before/while audio transfer: requestId -> bytes */
     private val pendingArtworkByRequestId = ConcurrentHashMap<String, ByteArray>()
 
+    /** Failsafe timeout per transfer to avoid hanging states at 0%. */
+    private val transferWatchdogs = ConcurrentHashMap<String, Job>()
+
     companion object {
         private const val TAG = "WearTransferRepo"
         private const val ARTWORK_FILE_EXTENSION = "jpg"
+        private const val TRANSFER_IDLE_TIMEOUT_MS = 20_000L
     }
 
     /**
@@ -134,6 +140,7 @@ class WearTransferRepository @Inject constructor(
                     status = WearTransferProgress.STATUS_TRANSFERRING,
                 ))
             }
+            armTransferWatchdog(requestId, songId)
 
             try {
                 val request = WearTransferRequest(requestId, songId)
@@ -171,6 +178,7 @@ class WearTransferRepository @Inject constructor(
         }
 
         pendingMetadata[metadata.requestId] = metadata
+        armTransferWatchdog(metadata.requestId, metadata.songId)
         _activeTransfers.update { map ->
             val current = map[metadata.requestId] ?: return@update map
             map + (metadata.requestId to current.copy(
@@ -199,6 +207,13 @@ class WearTransferRepository @Inject constructor(
 
         if (progress.status == WearTransferProgress.STATUS_FAILED) {
             handleTransferError(progress.requestId, progress.songId, progress.error ?: "Transfer failed")
+        } else if (
+            progress.status == WearTransferProgress.STATUS_COMPLETED ||
+            progress.status == WearTransferProgress.STATUS_CANCELLED
+        ) {
+            clearTransferWatchdog(progress.requestId)
+        } else {
+            armTransferWatchdog(progress.requestId, progress.songId)
         }
     }
 
@@ -223,6 +238,7 @@ class WearTransferRepository @Inject constructor(
         val previousSong = localSongDao.getSongById(metadata.songId)
 
         try {
+            armTransferWatchdog(requestId, metadata.songId)
             localFile.outputStream().use { fileOut ->
                 val buffer = ByteArray(8192)
                 var bytesRead: Int
@@ -274,6 +290,7 @@ class WearTransferRepository @Inject constructor(
             // Clean up transfer state
             _activeTransfers.update { it - requestId }
             songToRequestId.remove(metadata.songId)
+            clearTransferWatchdog(requestId)
 
             Timber.tag(TAG).d(
                 "Transfer complete: ${metadata.title} ($actualSize bytes) → ${localFile.absolutePath}"
@@ -331,6 +348,7 @@ class WearTransferRepository @Inject constructor(
             songToRequestId.remove(state.songId)
             pendingMetadata.remove(requestId)
             pendingArtworkByRequestId.remove(requestId)
+            clearTransferWatchdog(requestId)
         }
     }
 
@@ -340,6 +358,7 @@ class WearTransferRepository @Inject constructor(
      */
     suspend fun onArtworkReceived(requestId: String, songId: String, artworkBytes: ByteArray) {
         if (artworkBytes.isEmpty()) return
+        armTransferWatchdog(requestId, songId)
 
         val existing = localSongDao.getSongById(songId)
         if (existing != null) {
@@ -374,6 +393,7 @@ class WearTransferRepository @Inject constructor(
         songToRequestId.remove(songId)
         pendingMetadata.remove(requestId)
         pendingArtworkByRequestId.remove(requestId)
+        clearTransferWatchdog(requestId)
     }
 
     private fun LocalSongEntity.hasPlayableLocalFile(): Boolean {
@@ -420,5 +440,19 @@ class WearTransferRepository @Inject constructor(
         if (oldArtwork != null && oldArtwork != currentArtworkPath) {
             runCatching { File(oldArtwork).delete() }
         }
+    }
+
+    private fun armTransferWatchdog(requestId: String, songId: String) {
+        clearTransferWatchdog(requestId)
+        transferWatchdogs[requestId] = scope.launch {
+            delay(TRANSFER_IDLE_TIMEOUT_MS)
+            if (_activeTransfers.value.containsKey(requestId)) {
+                handleTransferError(requestId, songId, "Transfer timed out")
+            }
+        }
+    }
+
+    private fun clearTransferWatchdog(requestId: String) {
+        transferWatchdogs.remove(requestId)?.cancel()
     }
 }

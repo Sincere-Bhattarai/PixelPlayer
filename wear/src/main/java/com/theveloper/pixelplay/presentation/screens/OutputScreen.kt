@@ -130,7 +130,7 @@ private fun OutputTargetChip(
 ) {
     val palette = LocalWearPalette.current
     val containerColor = when {
-        !enabled -> palette.controlDisabledContainer.copy(alpha = 0.42f)
+        !enabled -> palette.controlDisabledContainer
         selected -> palette.controlContainer.copy(alpha = 0.95f)
         else -> palette.chipContainer
     }
@@ -140,7 +140,7 @@ private fun OutputTargetChip(
         else -> palette.textPrimary
     }
     val secondaryColor = when {
-        !enabled -> palette.controlDisabledContent.copy(alpha = 0.76f)
+        !enabled -> palette.controlDisabledContent.copy(alpha = 0.90f)
         selected -> palette.controlContent.copy(alpha = 0.76f)
         else -> palette.textSecondary.copy(alpha = 0.80f)
     }

@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.data.service.wear
 
 import android.content.ComponentName
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -565,6 +566,7 @@ class WearCommandReceiver : WearableListenerService() {
                                 title = title,
                                 subtitle = subtitle,
                                 type = WearLibraryItem.TYPE_SONG,
+                                canSaveToWatch = false,
                             )
                         )
                     }
@@ -587,7 +589,56 @@ class WearCommandReceiver : WearableListenerService() {
             title = title,
             subtitle = displayArtist,
             type = WearLibraryItem.TYPE_SONG,
+            canSaveToWatch = isSongLikelyTransferableForWatch(this),
         )
+    }
+
+    private fun isSongLikelyTransferableForWatch(song: Song): Boolean {
+        val contentUri = song.contentUriString
+        if (
+            contentUri.startsWith("telegram://") ||
+            contentUri.startsWith("netease://") ||
+            contentUri.startsWith("gdrive://")
+        ) {
+            return false
+        }
+
+        val localFile = song.path
+            .takeIf { it.isNotBlank() }
+            ?.let { File(it) }
+        if (localFile != null && localFile.isFile && localFile.canRead() && localFile.length() > 0L) {
+            return true
+        }
+
+        val scheme = runCatching { contentUri.toUri().scheme?.lowercase() }.getOrNull()
+        return scheme == ContentResolver.SCHEME_CONTENT || scheme == ContentResolver.SCHEME_FILE
+    }
+
+    private fun isSongTransferEligible(song: Song): Boolean {
+        if (!isSongLikelyTransferableForWatch(song)) return false
+
+        val localFile = song.path
+            .takeIf { it.isNotBlank() }
+            ?.let { File(it) }
+        if (localFile != null && localFile.isFile && localFile.canRead() && localFile.length() > 0L) {
+            return true
+        }
+
+        val uri = runCatching { song.contentUriString.toUri() }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase()
+        if (scheme == ContentResolver.SCHEME_FILE) {
+            val uriFile = uri.path?.let { File(it) }
+            return uriFile != null && uriFile.isFile && uriFile.canRead() && uriFile.length() > 0L
+        }
+        if (scheme != ContentResolver.SCHEME_CONTENT) return false
+
+        return try {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                afd.length != 0L
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
     }
 
     // ---- Volume handling ----
@@ -676,14 +727,11 @@ class WearCommandReceiver : WearableListenerService() {
                     return@launch
                 }
 
-                // 2. Verify it's a local file (NOT cloud)
-                val isCloud = song.contentUriString.startsWith("telegram://") ||
-                    song.contentUriString.startsWith("netease://") ||
-                    song.contentUriString.startsWith("gdrive://")
-                if (isCloud) {
+                // 2. Verify this song is truly available offline on the phone.
+                if (!isSongTransferEligible(song)) {
                     sendTransferMetadataError(
                         messageEvent.sourceNodeId, request.requestId, request.songId,
-                        "Cloud songs cannot be transferred"
+                        "Song must be downloaded locally on phone before saving to watch"
                     )
                     return@launch
                 }
@@ -1164,6 +1212,17 @@ class WearCommandReceiver : WearableListenerService() {
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Failed to send transfer error metadata")
         }
+
+        // Secondary signal so watch can clear pending transfer even if metadata handling is delayed.
+        sendTransferProgress(
+            nodeId = nodeId,
+            requestId = requestId,
+            songId = songId,
+            bytesTransferred = 0L,
+            totalBytes = 0L,
+            status = WearTransferProgress.STATUS_FAILED,
+            error = errorMessage,
+        )
     }
 
     private suspend fun sendTransferProgress(

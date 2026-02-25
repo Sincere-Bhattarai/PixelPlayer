@@ -36,6 +36,8 @@ data class WearPalette(
     val repeatActive: Color,
 )
 
+private val DefaultDisabledContainer = Color(0xFF5B516D)
+
 private val DefaultWearPalette = WearPalette(
     gradientTop = Color(0xFF6C3AD8),
     gradientMiddle = Color(0xFF2C1858),
@@ -45,8 +47,8 @@ private val DefaultWearPalette = WearPalette(
     textError = Color(0xFFFFB7C5),
     controlContainer = Color(0xFFE6DBFF).copy(alpha = 0.95f),
     controlContent = Color(0xFF2C0C62),
-    controlDisabledContainer = Color(0xFF9185AC),
-    controlDisabledContent = Color(0xFF615C70),
+    controlDisabledContainer = DefaultDisabledContainer,
+    controlDisabledContent = bestContrastContent(DefaultDisabledContainer),
     chipContainer = Color(0xFFD8CEF3).copy(alpha = 0.22f),
     chipContent = Color(0xFFE8E0FF),
     favoriteActive = Color(0xFFF1608E),
@@ -117,6 +119,8 @@ private fun buildPaletteFromSeedColor(seed: Color): WearPalette {
     val bottom = lerp(tunedSeed, Color.Black, 0.84f)
     val controlContainer = lerp(tunedSeed, Color.White, 0.80f)
     val controlContent = lerp(tunedSeed, Color.Black, 0.82f)
+    val controlDisabledContainer = lerp(tunedSeed, Color.Black, 0.58f).copy(alpha = 0.96f)
+    val controlDisabledContent = bestContrastContent(controlDisabledContainer)
     val chipContainer = lerp(tunedSeed, Color.White, 0.34f).copy(alpha = 0.24f)
 
     return WearPalette(
@@ -128,8 +132,8 @@ private fun buildPaletteFromSeedColor(seed: Color): WearPalette {
         textError = Color(0xFFFFB8C7),
         controlContainer = controlContainer.copy(alpha = 0.96f),
         controlContent = controlContent,
-        controlDisabledContainer = lerp(controlContainer, Color.Black, 0.35f).copy(alpha = 0.86f),
-        controlDisabledContent = lerp(controlContent, Color.White, 0.32f),
+        controlDisabledContainer = controlDisabledContainer,
+        controlDisabledContent = controlDisabledContent,
         chipContainer = chipContainer,
         chipContent = Color(0xFFF2EBFF),
         favoriteActive = buildAccentFromSeed(seedArgb, hueShift = 34f),
@@ -145,6 +149,23 @@ private fun buildAccentFromSeed(seedColor: Int, hueShift: Float): Color {
     hsl[1] = (hsl[1] * 1.22f).coerceIn(0.46f, 0.92f)
     hsl[2] = (hsl[2] + 0.08f).coerceIn(0.40f, 0.72f)
     return Color(ColorUtils.HSLToColor(hsl))
+}
+
+private fun bestContrastContent(background: Color): Color {
+    val light = Color(0xFFF6F2FF)
+    val dark = Color(0xFF17141E)
+    // ColorUtils.calculateContrast requires an opaque background.
+    val opaqueBackgroundArgb = if (background.alpha >= 0.999f) {
+        background.toArgb()
+    } else {
+        ColorUtils.compositeColors(
+            background.toArgb(),
+            Color.Black.toArgb(),
+        )
+    }
+    val lightContrast = ColorUtils.calculateContrast(light.toArgb(), opaqueBackgroundArgb)
+    val darkContrast = ColorUtils.calculateContrast(dark.toArgb(), opaqueBackgroundArgb)
+    return if (lightContrast >= darkContrast) light else dark
 }
 
 private fun extractSeedColor(bitmap: Bitmap): Color {

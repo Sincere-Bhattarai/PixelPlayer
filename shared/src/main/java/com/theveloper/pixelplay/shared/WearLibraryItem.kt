@@ -16,6 +16,8 @@ data class WearLibraryItem(
     val subtitle: String = "",
     /** Item type for UI rendering decisions */
     val type: String,
+    /** Whether this song can be transferred to watch local storage. */
+    val canSaveToWatch: Boolean = false,
 ) {
     companion object {
         const val TYPE_SONG = "song"
