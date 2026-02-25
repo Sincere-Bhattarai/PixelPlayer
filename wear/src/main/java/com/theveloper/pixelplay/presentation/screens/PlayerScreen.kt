@@ -64,15 +64,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -244,8 +247,12 @@ private fun AlbumArtPage(
     onTap: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
-    val clockTint = remember(albumArt, palette.textPrimary) {
-        deriveClockTintFromAlbumArt(albumArt, palette.textPrimary)
+    val textColors = remember(albumArt, palette.textPrimary, palette.textSecondary) {
+        deriveAlbumOverlayTextColors(
+            albumArt = albumArt,
+            fallbackPrimary = palette.textPrimary,
+            fallbackSecondary = palette.textSecondary,
+        )
     }
 
     Box(
@@ -282,34 +289,55 @@ private fun AlbumArtPage(
                     ),
                 ),
         )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0f to Color.Black.copy(alpha = 0.32f),
+                            0.14f to Color.Black.copy(alpha = 0.08f),
+                            0.24f to Color.Transparent,
+                            0.68f to Color.Transparent,
+                            0.86f to Color.Black.copy(alpha = 0.10f),
+                            1f to Color.Black.copy(alpha = 0.34f),
+                        ),
+                    ),
+                ),
+        )
 
         LargeAlbumClockText(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 12.dp)
                 .zIndex(5f),
-            color = clockTint,
+            color = textColors.clock,
+            shadow = textColors.clockShadow,
         )
 
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 24.dp, vertical = 28.dp),
+                .padding(horizontal = 36.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = state.songTitle.ifEmpty { "No song playing" },
-                style = MaterialTheme.typography.title2,
+                style = MaterialTheme.typography.title2.copy(
+                    shadow = textColors.bottomShadow,
+                ),
                 fontWeight = FontWeight.Bold,
-                color = palette.textPrimary,
+                color = textColors.title,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
             )
             Text(
                 text = state.artistName.ifEmpty { "Connect phone playback" },
-                style = MaterialTheme.typography.body1,
-                color = palette.textSecondary.copy(alpha = 0.94f),
+                style = MaterialTheme.typography.body1.copy(
+                    shadow = textColors.bottomShadow,
+                ),
+                color = textColors.artist,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
@@ -323,6 +351,7 @@ private fun AlbumArtPage(
 private fun LargeAlbumClockText(
     modifier: Modifier = Modifier,
     color: Color = Color.White,
+    shadow: Shadow? = null,
 ) {
     val displayTime by produceState(initialValue = "--:--") {
         val formatter = DateTimeFormatter.ofPattern("H:mm")
@@ -354,7 +383,179 @@ private fun LargeAlbumClockText(
         fontWeight = FontWeight(760),
         fontSize = 26.sp,
         lineHeight = 26.sp,
+        style = if (shadow != null) TextStyle(shadow = shadow) else TextStyle.Default,
         modifier = modifier,
+    )
+}
+
+private data class AlbumOverlayTextColors(
+    val clock: Color,
+    val title: Color,
+    val artist: Color,
+    val clockShadow: Shadow,
+    val bottomShadow: Shadow,
+)
+
+private fun deriveAlbumOverlayTextColors(
+    albumArt: Bitmap?,
+    fallbackPrimary: Color,
+    fallbackSecondary: Color,
+): AlbumOverlayTextColors {
+    if (albumArt == null || albumArt.width <= 0 || albumArt.height <= 0) {
+        val defaultShadow = Shadow(
+            color = Color.Black.copy(alpha = 0.56f),
+            offset = Offset(0f, 1.6f),
+            blurRadius = 5f,
+        )
+        return AlbumOverlayTextColors(
+            clock = fallbackPrimary,
+            title = fallbackPrimary,
+            artist = fallbackSecondary.copy(alpha = 0.92f),
+            clockShadow = defaultShadow,
+            bottomShadow = defaultShadow,
+        )
+    }
+
+    val topBg = sampleRegionAverageColor(albumArt, startYFraction = 0f, endYFraction = 0.24f)
+    val bottomBg = sampleRegionAverageColor(albumArt, startYFraction = 0.66f, endYFraction = 1f)
+
+    val preferredClock = deriveClockTintFromAlbumArt(albumArt, fallbackPrimary)
+    val clockColor = deriveReadableTintedColor(
+        preferred = preferredClock,
+        background = topBg,
+        minContrast = 4.8,
+        tintStrength = 0.34f,
+    )
+    val titleColor = deriveReadableTintedColor(
+        preferred = fallbackPrimary.copy(alpha = 0.99f),
+        background = bottomBg,
+        minContrast = 5.2,
+        tintStrength = 0.18f,
+    )
+    val artistColor = deriveReadableTintedColor(
+        preferred = fallbackSecondary.copy(alpha = 0.96f),
+        background = bottomBg,
+        minContrast = 4.4,
+        tintStrength = 0.22f,
+    ).copy(alpha = 0.97f)
+
+    val clockShadow = if (clockColor.luminance() < 0.5f) {
+        Shadow(
+            color = Color.White.copy(alpha = 0.36f),
+            offset = Offset(0f, 1.2f),
+            blurRadius = 4f,
+        )
+    } else {
+        Shadow(
+            color = Color.Black.copy(alpha = 0.58f),
+            offset = Offset(0f, 1.6f),
+            blurRadius = 5f,
+        )
+    }
+    val bottomShadow = if (titleColor.luminance() < 0.5f) {
+        Shadow(
+            color = Color.White.copy(alpha = 0.30f),
+            offset = Offset(0f, 1.2f),
+            blurRadius = 4f,
+        )
+    } else {
+        Shadow(
+            color = Color.Black.copy(alpha = 0.55f),
+            offset = Offset(0f, 1.6f),
+            blurRadius = 5f,
+        )
+    }
+
+    return AlbumOverlayTextColors(
+        clock = clockColor,
+        title = titleColor,
+        artist = artistColor,
+        clockShadow = clockShadow,
+        bottomShadow = bottomShadow,
+    )
+}
+
+private fun deriveReadableTintedColor(
+    preferred: Color,
+    background: Color,
+    minContrast: Double,
+    tintStrength: Float,
+): Color {
+    val lightBase = Color(0xFFF7F7F7)
+    val darkBase = Color(0xFF111111)
+
+    val lightContrast = ColorUtils.calculateContrast(lightBase.toArgb(), background.toArgb())
+    val darkContrast = ColorUtils.calculateContrast(darkBase.toArgb(), background.toArgb())
+    val highContrastBase = if (lightContrast >= darkContrast) lightBase else darkBase
+
+    val preferredContrast = ColorUtils.calculateContrast(preferred.toArgb(), background.toArgb())
+    if (preferredContrast >= minContrast) return preferred
+
+    val clampedTintStrength = tintStrength.coerceIn(0f, 0.5f)
+    val tintSteps = floatArrayOf(
+        clampedTintStrength,
+        clampedTintStrength * 0.72f,
+        clampedTintStrength * 0.46f,
+        clampedTintStrength * 0.24f,
+        0f,
+    )
+
+    tintSteps.forEach { blend ->
+        val candidate = androidx.compose.ui.graphics.lerp(highContrastBase, preferred, blend)
+        val contrast = ColorUtils.calculateContrast(candidate.toArgb(), background.toArgb())
+        if (contrast >= minContrast) {
+            return candidate
+        }
+    }
+
+    return highContrastBase
+}
+
+private fun sampleRegionAverageColor(
+    albumArt: Bitmap,
+    startYFraction: Float,
+    endYFraction: Float,
+): Color {
+    val width = albumArt.width
+    val height = albumArt.height
+    val yStart = (height * startYFraction).toInt().coerceIn(0, height - 1)
+    val yEnd = (height * endYFraction).toInt().coerceIn(yStart + 1, height)
+    val step = (min(width, (yEnd - yStart).coerceAtLeast(1)) / 24).coerceAtLeast(1)
+
+    var redSum = 0L
+    var greenSum = 0L
+    var blueSum = 0L
+    var count = 0L
+
+    var y = yStart
+    while (y < yEnd) {
+        var x = 0
+        while (x < width) {
+            val pixel = albumArt.getPixel(x, y)
+            val alpha = android.graphics.Color.alpha(pixel)
+            if (alpha >= 28) {
+                val r = android.graphics.Color.red(pixel)
+                val g = android.graphics.Color.green(pixel)
+                val b = android.graphics.Color.blue(pixel)
+                if (r + g + b > 30) {
+                    redSum += r
+                    greenSum += g
+                    blueSum += b
+                    count++
+                }
+            }
+            x += step
+        }
+        y += step
+    }
+
+    if (count == 0L) return Color.Black
+    return Color(
+        android.graphics.Color.rgb(
+            (redSum / count).toInt(),
+            (greenSum / count).toInt(),
+            (blueSum / count).toInt(),
+        )
     )
 }
 

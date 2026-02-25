@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
+import android.net.Uri
 import com.google.android.gms.wearable.Asset
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
@@ -34,6 +35,7 @@ class WearStatePublisher @Inject constructor(
     private val application: Application,
 ) {
     private val dataClient by lazy { Wearable.getDataClient(application) }
+    private val contentResolver by lazy { application.contentResolver }
     private val audioManager by lazy {
         application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     }
@@ -42,9 +44,10 @@ class WearStatePublisher @Inject constructor(
 
     companion object {
         private const val TAG = "WearStatePublisher"
-        private const val ART_MAX_DIMENSION = 720 // px, slightly higher detail for full-screen watch art
-        private const val ART_QUALITY = 95 // JPEG quality
-        private const val MAX_DIRECT_ASSET_BYTES = 900_000 // keep direct transfer bounded
+        private const val ART_MAX_DIMENSION = 2048 // px, near-original quality on watch screens
+        private const val ART_QUALITY = 99 // JPEG quality
+        private const val MAX_DIRECT_ASSET_BYTES = 10_000_000 // keep full assets when practical
+        private const val MAX_URI_BYTES = 12_000_000 // hard cap for URI direct reads
     }
 
     /**
@@ -109,7 +112,8 @@ class WearStatePublisher @Inject constructor(
             dataMap.putLong(WearDataPaths.KEY_TIMESTAMP, System.currentTimeMillis())
 
             // Attach album art as Asset if available
-            val artAsset = createAlbumArtAsset(playerInfo.albumArtBitmapData)
+            val wearArtBytes = resolveArtworkBytesForWear(playerInfo)
+            val artAsset = createAlbumArtAsset(wearArtBytes)
             if (artAsset != null) {
                 dataMap.putAsset(WearDataPaths.KEY_ALBUM_ART, artAsset)
             } else {
@@ -119,6 +123,62 @@ class WearStatePublisher @Inject constructor(
 
         dataClient.putDataItem(request)
         Timber.tag(TAG).d("Published state to Wear: ${wearState.songTitle} (playing=${wearState.isPlaying})")
+    }
+
+    private fun resolveArtworkBytesForWear(playerInfo: PlayerInfo): ByteArray? {
+        val uriString = playerInfo.albumArtUri
+        if (!uriString.isNullOrBlank()) {
+            readBytesFromUriCapped(uriString, MAX_URI_BYTES)?.let { return it }
+            renderUriArtworkForWear(uriString)?.let { return it }
+        }
+        return playerInfo.albumArtBitmapData
+    }
+
+    private fun readBytesFromUriCapped(uriString: String, maxBytes: Int): ByteArray? {
+        return try {
+            val uri = Uri.parse(uriString)
+            contentResolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(16 * 1024)
+                val output = ByteArrayOutputStream()
+                var total = 0
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    total += read
+                    if (total > maxBytes) {
+                        Timber.tag(TAG).d(
+                            "Artwork URI too large for direct transfer (%d bytes): %s",
+                            total,
+                            uriString
+                        )
+                        return null
+                    }
+                    output.write(buffer, 0, read)
+                }
+                output.toByteArray().takeIf { it.isNotEmpty() }
+            }
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to read artwork bytes from URI: %s", uriString)
+            null
+        }
+    }
+
+    /**
+     * Fallback path when a URI asset can't be transferred as-is (e.g. too large).
+     * Decodes from URI and re-encodes with high quality at bounded dimensions.
+     */
+    private fun renderUriArtworkForWear(uriString: String): ByteArray? {
+        return try {
+            val uri = Uri.parse(uriString)
+            val bounded = decodeBoundedBitmapFromUri(uri, ART_MAX_DIMENSION) ?: return null
+            val output = ByteArrayOutputStream()
+            bounded.compress(Bitmap.CompressFormat.JPEG, ART_QUALITY, output)
+            bounded.recycle()
+            output.toByteArray().takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed URI artwork fallback render: %s", uriString)
+            null
+        }
     }
 
     /**
@@ -192,6 +252,46 @@ class WearStatePublisher @Inject constructor(
         if (resized !== decoded) {
             decoded.recycle()
         }
+        return resized
+    }
+
+    private fun decodeBoundedBitmapFromUri(uri: Uri, maxDimension: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, bounds)
+        } ?: return null
+
+        val srcWidth = bounds.outWidth
+        val srcHeight = bounds.outHeight
+        if (srcWidth <= 0 || srcHeight <= 0) return null
+
+        var sampleSize = 1
+        while (
+            (srcWidth / sampleSize) > maxDimension * 2 ||
+            (srcHeight / sampleSize) > maxDimension * 2
+        ) {
+            sampleSize *= 2
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inJustDecodeBounds = false
+            inMutable = false
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+
+        val decoded = contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, decodeOptions)
+        } ?: return null
+
+        val decodedMax = max(decoded.width, decoded.height)
+        if (decodedMax <= maxDimension) return decoded
+
+        val scale = maxDimension.toFloat() / decodedMax.toFloat()
+        val targetWidth = (decoded.width * scale).roundToInt().coerceAtLeast(1)
+        val targetHeight = (decoded.height * scale).roundToInt().coerceAtLeast(1)
+        val resized = Bitmap.createScaledBitmap(decoded, targetWidth, targetHeight, true)
+        if (resized !== decoded) decoded.recycle()
         return resized
     }
 }

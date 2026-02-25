@@ -919,6 +919,8 @@ class MusicService : MediaLibraryService() {
     }
 
     private val widgetArtByteArrayCache = LruCache<String, ByteArray>(5)
+    private val widgetArtFallbackSizePx = 1024
+    private val widgetArtFallbackJpegQuality = 95
 
     private suspend fun getAlbumArtForWidget(embeddedArt: ByteArray?, artUri: Uri?): Pair<ByteArray?, String?> = withContext(Dispatchers.IO) {
         if (embeddedArt != null && embeddedArt.isNotEmpty()) {
@@ -977,16 +979,20 @@ class MusicService : MediaLibraryService() {
 
     private suspend fun loadBitmapDataFromUri(context: Context, uri: Uri): ByteArray? = withContext(Dispatchers.IO) {
         try {
-            val request = ImageRequest.Builder(context).data(uri).size(Size(256, 256)).allowHardware(false).build()
+            val request = ImageRequest.Builder(context)
+                .data(uri)
+                .size(Size(widgetArtFallbackSizePx, widgetArtFallbackSizePx))
+                .allowHardware(false)
+                .build()
             val drawable = context.imageLoader.execute(request).drawable
             drawable?.let {
-                val bitmap = it.toBitmap(256, 256)
+                val sourceWidth = it.intrinsicWidth.takeIf { w -> w > 0 } ?: widgetArtFallbackSizePx
+                val sourceHeight = it.intrinsicHeight.takeIf { h -> h > 0 } ?: widgetArtFallbackSizePx
+                val targetWidth = minOf(sourceWidth, widgetArtFallbackSizePx)
+                val targetHeight = minOf(sourceHeight, widgetArtFallbackSizePx)
+                val bitmap = it.toBitmap(targetWidth, targetHeight)
                 val stream = ByteArrayOutputStream()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, stream)
-                } else {
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
-                }
+                bitmap.compress(Bitmap.CompressFormat.JPEG, widgetArtFallbackJpegQuality, stream)
                 stream.toByteArray()
             }
         } catch (e: Exception) {
