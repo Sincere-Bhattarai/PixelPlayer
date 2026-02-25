@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.theveloper.pixelplay.data.WearLibraryRepository
 import com.theveloper.pixelplay.data.WearPlaybackController
 import com.theveloper.pixelplay.shared.WearLibraryItem
-import com.theveloper.pixelplay.shared.WearPlaybackCommand
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,14 +56,21 @@ class WearBrowseViewModel @Inject constructor(
      * Sets up the full queue on the phone so next/previous work correctly.
      */
     fun playFromContext(songId: String, contextType: String, contextId: String?) {
-        playbackController.sendCommand(
-            WearPlaybackCommand(
-                action = WearPlaybackCommand.PLAY_FROM_CONTEXT,
-                songId = songId,
-                contextType = contextType,
-                contextId = contextId,
-            )
-        )
+        playbackController.playFromContext(songId, contextType, contextId)
+    }
+
+    /**
+     * Insert song as next item in current queue.
+     */
+    fun playNextFromContext(songId: String, contextType: String, contextId: String?) {
+        playbackController.playNextFromContext(songId, contextType, contextId)
+    }
+
+    /**
+     * Append song to queue end.
+     */
+    fun addToQueueFromContext(songId: String, contextType: String, contextId: String?) {
+        playbackController.addToQueueFromContext(songId, contextType, contextId)
     }
 
     /**

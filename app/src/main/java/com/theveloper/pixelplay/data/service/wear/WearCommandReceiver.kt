@@ -11,6 +11,7 @@ import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.google.common.util.concurrent.ListenableFuture
+import androidx.media3.common.C
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.media3.session.SessionCommand
@@ -109,6 +110,12 @@ class WearCommandReceiver : WearableListenerService() {
             WearPlaybackCommand.PLAY_FROM_CONTEXT -> {
                 handlePlayFromContext(command)
             }
+            WearPlaybackCommand.PLAY_NEXT_FROM_CONTEXT -> {
+                handleInsertIntoQueue(command, playNext = true)
+            }
+            WearPlaybackCommand.ADD_TO_QUEUE_FROM_CONTEXT -> {
+                handleInsertIntoQueue(command, playNext = false)
+            }
             else -> {
                 getOrBuildMediaController { controller ->
                     when (command.action) {
@@ -159,6 +166,48 @@ class WearCommandReceiver : WearableListenerService() {
                         else -> Timber.tag(TAG).w("Unknown playback action: ${command.action}")
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Resolve the song from browse context and insert it into queue.
+     * - playNext = true: insert right after current item
+     * - playNext = false: append to queue end
+     */
+    private fun handleInsertIntoQueue(command: WearPlaybackCommand, playNext: Boolean) {
+        val songId = command.songId
+        if (songId.isNullOrBlank()) {
+            Timber.tag(TAG).w("Queue insert missing songId")
+            return
+        }
+
+        scope.launch {
+            try {
+                val song = resolveSongForCommand(command)
+                if (song == null) {
+                    Timber.tag(TAG).w("Cannot resolve song for queue insert: songId=$songId")
+                    return@launch
+                }
+                val mediaItem = MediaItemBuilder.build(song)
+
+                getOrBuildMediaController { controller ->
+                    if (playNext) {
+                        val currentIndex = controller.currentMediaItemIndex
+                        val insertionIndex = if (currentIndex == C.INDEX_UNSET) {
+                            controller.mediaItemCount
+                        } else {
+                            (currentIndex + 1).coerceAtMost(controller.mediaItemCount)
+                        }
+                        controller.addMediaItem(insertionIndex, mediaItem)
+                        Timber.tag(TAG).d("Inserted as next: ${song.title} at index=$insertionIndex")
+                    } else {
+                        controller.addMediaItem(mediaItem)
+                        Timber.tag(TAG).d("Appended to queue: ${song.title}")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Failed to insert song into queue")
             }
         }
     }
@@ -234,6 +283,20 @@ class WearCommandReceiver : WearableListenerService() {
                 emptyList()
             }
         }
+    }
+
+    private suspend fun resolveSongForCommand(command: WearPlaybackCommand): Song? {
+        val songId = command.songId ?: return null
+        val contextType = command.contextType
+        val contextId = command.contextId
+
+        if (!contextType.isNullOrBlank()) {
+            val contextSongs = getSongsForContext(contextType, contextId)
+            val inContext = contextSongs.firstOrNull { it.id == songId }
+            if (inContext != null) return inContext
+        }
+
+        return musicRepository.getSongsByIds(listOf(songId)).first().firstOrNull()
     }
 
     // ---- Browse request handling ----

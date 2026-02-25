@@ -31,5 +31,9 @@ data class WearPlaybackCommand(
         const val PLAY_ITEM = "play_item"
         /** Play a song within a context (album/artist/playlist queue) */
         const val PLAY_FROM_CONTEXT = "play_from_context"
+        /** Insert a song as next item in the active queue (without interrupting current playback). */
+        const val PLAY_NEXT_FROM_CONTEXT = "play_next_from_context"
+        /** Append a song to the end of the active queue. */
+        const val ADD_TO_QUEUE_FROM_CONTEXT = "add_to_queue_from_context"
     }
 }

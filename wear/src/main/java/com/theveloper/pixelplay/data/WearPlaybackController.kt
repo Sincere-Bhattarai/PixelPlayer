@@ -83,6 +83,24 @@ class WearPlaybackController @Inject constructor(
         )
     )
 
+    fun playNextFromContext(songId: String, contextType: String, contextId: String?) = sendCommand(
+        WearPlaybackCommand(
+            action = WearPlaybackCommand.PLAY_NEXT_FROM_CONTEXT,
+            songId = songId,
+            contextType = contextType,
+            contextId = contextId,
+        )
+    )
+
+    fun addToQueueFromContext(songId: String, contextType: String, contextId: String?) = sendCommand(
+        WearPlaybackCommand(
+            action = WearPlaybackCommand.ADD_TO_QUEUE_FROM_CONTEXT,
+            songId = songId,
+            contextType = contextType,
+            contextId = contextId,
+        )
+    )
+
     private suspend fun sendMessageToPhone(path: String, data: ByteArray) {
         try {
             val nodes = nodeClient.connectedNodes.await()
