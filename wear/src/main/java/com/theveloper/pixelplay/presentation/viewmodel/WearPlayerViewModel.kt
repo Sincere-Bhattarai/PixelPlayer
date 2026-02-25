@@ -2,52 +2,128 @@ package com.theveloper.pixelplay.presentation.viewmodel
 
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.theveloper.pixelplay.data.WearLocalPlayerRepository
+import com.theveloper.pixelplay.data.WearOutputTarget
 import com.theveloper.pixelplay.data.WearPlaybackController
 import com.theveloper.pixelplay.data.WearStateRepository
 import com.theveloper.pixelplay.shared.WearPlayerState
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
 /**
  * ViewModel for the Wear player screen.
- * Observes the player state from WearStateRepository and dispatches
- * playback commands via WearPlaybackController.
+ * Supports dual-mode playback:
+ * - Remote: phone playback via WearPlaybackController (Phase 1)
+ * - Local: standalone ExoPlayer via WearLocalPlayerRepository (Phase 3)
+ *
+ * When local playback is active, commands are routed to the local player.
+ * The [playerState] flow combines both sources into a unified WearPlayerState.
  */
 @HiltViewModel
 class WearPlayerViewModel @Inject constructor(
     private val stateRepository: WearStateRepository,
     private val playbackController: WearPlaybackController,
+    private val localPlayerRepository: WearLocalPlayerRepository,
 ) : ViewModel() {
 
-    val playerState: StateFlow<WearPlayerState> = stateRepository.playerState
+    /** Whether local playback is currently active on the watch */
+    val isLocalPlaybackActive: StateFlow<Boolean> = localPlayerRepository.isLocalPlaybackActive
+
+    /** Current target selected by the user in Output screen */
+    val outputTarget: StateFlow<WearOutputTarget> = stateRepository.outputTarget
+
+    /** Whether UI is currently controlling the watch output */
+    val isWatchOutputSelected: StateFlow<Boolean> = outputTarget
+        .map { it == WearOutputTarget.WATCH }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    /**
+     * Unified player state based on selected output target.
+     */
+    val playerState: StateFlow<WearPlayerState> = combine(
+        stateRepository.outputTarget,
+        localPlayerRepository.localPlayerState,
+        stateRepository.playerState,
+    ) { target, localState, remoteState ->
+        when (target) {
+            WearOutputTarget.WATCH -> {
+                WearPlayerState(
+                    songId = localState.songId,
+                    songTitle = localState.songTitle,
+                    artistName = localState.artistName,
+                    albumName = localState.albumName,
+                    isPlaying = localState.isPlaying,
+                    currentPositionMs = localState.currentPositionMs,
+                    totalDurationMs = localState.totalDurationMs,
+                )
+            }
+
+            WearOutputTarget.PHONE -> remoteState
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), WearPlayerState())
+
     val albumArt: StateFlow<Bitmap?> = stateRepository.albumArt
     val isPhoneConnected: StateFlow<Boolean> = stateRepository.isPhoneConnected
 
-    fun togglePlayPause() {
-        val current = playerState.value
-        stateRepository.updatePlayerState(
-            current.copy(isPlaying = !current.isPlaying)
-        )
-        playbackController.togglePlayPause()
+    fun selectOutput(target: WearOutputTarget) {
+        if (target == WearOutputTarget.WATCH && !localPlayerRepository.isLocalPlaybackActive.value) {
+            return
+        }
+        stateRepository.setOutputTarget(target)
+        if (target == WearOutputTarget.PHONE && localPlayerRepository.localPlayerState.value.isPlaying) {
+            localPlayerRepository.pause()
+        }
     }
 
-    fun next() = playbackController.next()
-    fun previous() = playbackController.previous()
+    fun togglePlayPause() {
+        if (isWatchOutputSelected.value) {
+            localPlayerRepository.togglePlayPause()
+        } else {
+            val current = stateRepository.playerState.value
+            stateRepository.updatePlayerState(
+                current.copy(isPlaying = !current.isPlaying)
+            )
+            playbackController.togglePlayPause()
+        }
+    }
+
+    fun next() {
+        if (isWatchOutputSelected.value) localPlayerRepository.next()
+        else playbackController.next()
+    }
+
+    fun previous() {
+        if (isWatchOutputSelected.value) localPlayerRepository.previous()
+        else playbackController.previous()
+    }
 
     fun toggleFavorite() {
-        val current = playerState.value
+        if (isWatchOutputSelected.value) return // Not supported for local playback
+        val current = stateRepository.playerState.value
         playbackController.toggleFavorite(targetEnabled = !current.isFavorite)
     }
 
     fun toggleShuffle() {
+        if (isWatchOutputSelected.value) return // Not supported for local playback
         playbackController.toggleShuffle()
     }
 
     fun cycleRepeat() {
+        if (isWatchOutputSelected.value) return // Not supported for local playback
         playbackController.cycleRepeat()
     }
 
     fun volumeUp() = playbackController.volumeUp()
     fun volumeDown() = playbackController.volumeDown()
+
+    /** Stop local playback and switch back to remote mode */
+    fun stopLocalPlayback() {
+        localPlayerRepository.release()
+    }
 }

@@ -7,7 +7,9 @@ import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.theveloper.pixelplay.presentation.screens.BrowseScreen
+import com.theveloper.pixelplay.presentation.screens.DownloadsScreen
 import com.theveloper.pixelplay.presentation.screens.LibraryListScreen
+import com.theveloper.pixelplay.presentation.screens.OutputScreen
 import com.theveloper.pixelplay.presentation.screens.PlayerScreen
 import com.theveloper.pixelplay.presentation.screens.SongListScreen
 import com.theveloper.pixelplay.presentation.screens.VolumeScreen
@@ -26,7 +28,9 @@ import java.net.URLEncoder
 object WearScreens {
     const val PLAYER = "player"
     const val VOLUME = "volume"
+    const val OUTPUT = "output"
     const val BROWSE = "browse"
+    const val DOWNLOADS = "downloads"
     const val LIBRARY_LIST = "library_list/{browseType}/{title}"
     const val SONG_LIST = "song_list/{browseType}/{contextId}/{title}"
 
@@ -57,6 +61,11 @@ fun WearNavigation() {
                         launchSingleTop = true
                     }
                 },
+                onOutputClick = {
+                    navController.navigate(WearScreens.OUTPUT) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 
@@ -64,18 +73,35 @@ fun WearNavigation() {
             VolumeScreen()
         }
 
+        composable(WearScreens.OUTPUT) {
+            OutputScreen()
+        }
+
+        composable(WearScreens.DOWNLOADS) {
+            DownloadsScreen(
+                onSongClick = {
+                    navController.popBackStack(WearScreens.PLAYER, inclusive = false)
+                },
+            )
+        }
+
         composable(WearScreens.BROWSE) {
             BrowseScreen(
                 onCategoryClick = { browseType, title ->
-                    // Favorites and All Songs go directly to songs list
-                    if (browseType == "favorites" || browseType == "all_songs") {
-                        navController.navigate(
-                            WearScreens.songListRoute(browseType, "none", title)
-                        )
-                    } else {
-                        navController.navigate(
-                            WearScreens.libraryListRoute(browseType, title)
-                        )
+                    when (browseType) {
+                        "downloads" -> {
+                            navController.navigate(WearScreens.DOWNLOADS)
+                        }
+                        "favorites", "all_songs" -> {
+                            navController.navigate(
+                                WearScreens.songListRoute(browseType, "none", title)
+                            )
+                        }
+                        else -> {
+                            navController.navigate(
+                                WearScreens.libraryListRoute(browseType, title)
+                            )
+                        }
                     }
                 },
             )

@@ -41,6 +41,8 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,11 +67,11 @@ import com.theveloper.pixelplay.utils.formatDuration
 import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import androidx.core.net.toUri
-import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.theveloper.pixelplay.data.ai.SongMetadata
 import com.theveloper.pixelplay.data.media.CoverArtUpdate
 import com.theveloper.pixelplay.ui.theme.MontserratFamily
+import com.theveloper.pixelplay.presentation.viewmodel.SongInfoBottomSheetViewModel
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -97,6 +99,16 @@ fun SongInfoBottomSheet(
 ) {
     val context = LocalContext.current
     var showEditSheet by remember { mutableStateOf(false) }
+    val songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
+    val isPixelPlayWatchAvailable by songInfoViewModel.isPixelPlayWatchAvailable.collectAsState()
+    val isSendingToWatch by songInfoViewModel.isSendingToWatch.collectAsState()
+    val canSendToWatch = remember(song.path, song.contentUriString) {
+        songInfoViewModel.isLocalSongForWatchTransfer(song)
+    }
+
+    LaunchedEffect(song.id) {
+        songInfoViewModel.refreshWatchAvailability()
+    }
 
     val evenCornerRadiusElems = 26.dp
 
@@ -409,6 +421,35 @@ fun SongInfoBottomSheet(
                                         }
                                     }
                                 }
+
+                                if (isPixelPlayWatchAvailable && canSendToWatch) {
+                                    item {
+                                        FilledTonalButton(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(min = 66.dp),
+                                            colors = ButtonDefaults.filledTonalButtonColors(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                            ),
+                                            shape = CircleShape,
+                                            enabled = !isSendingToWatch,
+                                            onClick = {
+                                                songInfoViewModel.sendSongToWatch(song) { message ->
+                                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.Share,
+                                                contentDescription = "Send to watch"
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(if (isSendingToWatch) "Sending..." else "Send to Watch")
+                                        }
+                                    }
+                                }
+
                                 item {
                                     Spacer(Modifier.height(80.dp))
                                 }

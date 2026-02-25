@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionIndicator
 import com.theveloper.pixelplay.presentation.components.WearTopTimeText
@@ -119,6 +120,15 @@ fun BrowseScreen(
                     icon = Icons.Rounded.MusicNote,
                     iconTint = palette.textSecondary,
                     onClick = { onCategoryClick("all_songs", "All Songs") },
+                )
+            }
+
+            item {
+                BrowseCategoryChip(
+                    label = "On Watch",
+                    icon = Icons.Rounded.Watch,
+                    iconTint = palette.textSecondary,
+                    onClick = { onCategoryClick("downloads", "On Watch") },
                 )
             }
         }

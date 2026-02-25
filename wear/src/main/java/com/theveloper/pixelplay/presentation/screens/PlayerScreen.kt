@@ -40,6 +40,7 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -92,15 +93,18 @@ import com.theveloper.pixelplay.shared.WearPlayerState
 fun PlayerScreen(
     onBrowseClick: () -> Unit = {},
     onVolumeClick: () -> Unit = {},
+    onOutputClick: () -> Unit = {},
     onQueueClick: () -> Unit = onBrowseClick,
     viewModel: WearPlayerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.playerState.collectAsState()
     val isPhoneConnected by viewModel.isPhoneConnected.collectAsState()
+    val isWatchOutputSelected by viewModel.isWatchOutputSelected.collectAsState()
 
     PlayerContent(
         state = state,
         isPhoneConnected = isPhoneConnected,
+        isWatchOutputSelected = isWatchOutputSelected,
         onTogglePlayPause = viewModel::togglePlayPause,
         onNext = viewModel::next,
         onPrevious = viewModel::previous,
@@ -109,6 +113,7 @@ fun PlayerScreen(
         onCycleRepeat = viewModel::cycleRepeat,
         onBrowseClick = onBrowseClick,
         onVolumeClick = onVolumeClick,
+        onOutputClick = onOutputClick,
         onQueueClick = onQueueClick,
     )
 }
@@ -117,6 +122,7 @@ fun PlayerScreen(
 private fun PlayerContent(
     state: WearPlayerState,
     isPhoneConnected: Boolean,
+    isWatchOutputSelected: Boolean = false,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -125,6 +131,7 @@ private fun PlayerContent(
     onCycleRepeat: () -> Unit,
     onBrowseClick: () -> Unit,
     onVolumeClick: () -> Unit,
+    onOutputClick: () -> Unit,
     onQueueClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
@@ -155,6 +162,7 @@ private fun PlayerContent(
                     MainPlayerPage(
                         state = state,
                         isPhoneConnected = isPhoneConnected,
+                        isWatchOutputSelected = isWatchOutputSelected,
                         onTogglePlayPause = onTogglePlayPause,
                         onNext = onNext,
                         onPrevious = onPrevious,
@@ -171,6 +179,7 @@ private fun PlayerContent(
                         enabled = true,
                         onBrowseClick = onBrowseClick,
                         onVolumeClick = onVolumeClick,
+                        onOutputClick = onOutputClick,
                     )
                 }
             }
@@ -202,6 +211,7 @@ private fun PlayerContent(
 private fun MainPlayerPage(
     state: WearPlayerState,
     isPhoneConnected: Boolean,
+    isWatchOutputSelected: Boolean = false,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -276,6 +286,7 @@ private fun MainPlayerPage(
                 HeaderBlock(
                     state = state,
                     isPhoneConnected = isPhoneConnected,
+                    isWatchOutputSelected = isWatchOutputSelected,
                 )
             }
 
@@ -285,7 +296,7 @@ private fun MainPlayerPage(
                 MainControlsRow(
                     isPlaying = state.isPlaying,
                     isEmpty = state.isEmpty,
-                    enabled = isPhoneConnected,
+                    enabled = if (isWatchOutputSelected) !state.isEmpty else isPhoneConnected,
                     trackProgress = trackProgress,
                     onTogglePlayPause = onTogglePlayPause,
                     onNext = onNext,
@@ -293,21 +304,21 @@ private fun MainPlayerPage(
                 )
             }
 
-            //item { Spacer(modifier = Modifier.height(8.dp)) }
-
-            item {
-                SecondaryControlsRow(
-                    isFavorite = state.isFavorite,
-                    isShuffleEnabled = state.isShuffleEnabled,
-                    repeatMode = state.repeatMode,
-                    enabled = isPhoneConnected && !state.isEmpty,
-                    onToggleFavorite = onToggleFavorite,
-                    onToggleShuffle = onToggleShuffle,
-                    onCycleRepeat = onCycleRepeat,
-                    favoriteActiveColor = palette.favoriteActive,
-                    shuffleActiveColor = palette.shuffleActive,
-                    repeatActiveColor = palette.repeatActive,
-                )
+            if (!isWatchOutputSelected) {
+                item {
+                    SecondaryControlsRow(
+                        isFavorite = state.isFavorite,
+                        isShuffleEnabled = state.isShuffleEnabled,
+                        repeatMode = state.repeatMode,
+                        enabled = isPhoneConnected && !state.isEmpty,
+                        onToggleFavorite = onToggleFavorite,
+                        onToggleShuffle = onToggleShuffle,
+                        onCycleRepeat = onCycleRepeat,
+                        favoriteActiveColor = palette.favoriteActive,
+                        shuffleActiveColor = palette.shuffleActive,
+                        repeatActiveColor = palette.repeatActive,
+                    )
+                }
             }
 
             item { Spacer(modifier = Modifier.height(50.dp)) }
@@ -333,6 +344,7 @@ private fun MainPlayerPage(
 private fun HeaderBlock(
     state: WearPlayerState,
     isPhoneConnected: Boolean,
+    isWatchOutputSelected: Boolean = false,
 ) {
     val palette = LocalWearPalette.current
     Column(
@@ -352,18 +364,34 @@ private fun HeaderBlock(
 
         Text(
             text = when {
+                isWatchOutputSelected && state.artistName.isNotEmpty() -> state.artistName
+                isWatchOutputSelected -> "On watch"
                 !isPhoneConnected -> "No phone"
                 state.artistName.isNotEmpty() -> state.artistName
                 state.isEmpty -> "Waiting playback"
                 else -> "Artist name"
             },
             style = MaterialTheme.typography.body1,
-            color = if (isPhoneConnected) palette.textSecondary else palette.textError,
+            color = when {
+                isWatchOutputSelected -> palette.textSecondary
+                !isPhoneConnected -> palette.textError
+                else -> palette.textSecondary
+            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        if (isWatchOutputSelected) {
+            Text(
+                text = "On watch",
+                style = MaterialTheme.typography.caption3,
+                color = palette.shuffleActive.copy(alpha = 0.85f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -719,6 +747,7 @@ private fun UtilityPage(
     enabled: Boolean,
     onBrowseClick: () -> Unit,
     onVolumeClick: () -> Unit,
+    onOutputClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -741,6 +770,15 @@ private fun UtilityPage(
             label = "Volume",
             enabled = enabled,
             onClick = onVolumeClick,
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        UtilityPillButton(
+            icon = Icons.Rounded.PhoneAndroid,
+            label = "Output",
+            enabled = enabled,
+            onClick = onOutputClick,
         )
     }
 }

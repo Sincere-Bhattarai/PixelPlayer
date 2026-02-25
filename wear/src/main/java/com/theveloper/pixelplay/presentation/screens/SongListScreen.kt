@@ -37,9 +37,14 @@ import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
 import com.theveloper.pixelplay.shared.WearBrowseRequest
 import com.theveloper.pixelplay.shared.WearLibraryItem
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import com.theveloper.pixelplay.data.TransferState
+import com.theveloper.pixelplay.presentation.viewmodel.WearDownloadsViewModel
+import com.theveloper.pixelplay.shared.WearTransferProgress
 
 /**
  * Screen showing songs within a specific context (album, artist, playlist, favorites, all songs).
@@ -52,8 +57,11 @@ fun SongListScreen(
     title: String,
     onSongPlayed: () -> Unit = {},
     viewModel: WearBrowseViewModel = hiltViewModel(),
+    downloadsViewModel: WearDownloadsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val downloadedIds by downloadsViewModel.downloadedSongIds.collectAsState()
+    val activeTransfers by downloadsViewModel.activeTransfers.collectAsState()
     val palette = LocalWearPalette.current
 
     // Determine the context type for playback (maps browseType to context)
@@ -216,8 +224,12 @@ fun SongListScreen(
                     } else {
                         items(state.items.size) { index ->
                             val song = state.items[index]
+                            val isDownloaded = downloadedIds.contains(song.id)
+                            val transfer = activeTransfers.values.firstOrNull { it.songId == song.id }
                             SongChip(
                                 song = song,
+                                isDownloaded = isDownloaded,
+                                transfer = transfer,
                                 onClick = {
                                     viewModel.playFromContext(
                                         songId = song.id,
@@ -225,6 +237,9 @@ fun SongListScreen(
                                         contextId = playbackContextId,
                                     )
                                     onSongPlayed()
+                                },
+                                onDownloadClick = {
+                                    downloadsViewModel.requestDownload(song.id)
                                 },
                             )
                         }
@@ -251,9 +266,15 @@ fun SongListScreen(
 @Composable
 private fun SongChip(
     song: WearLibraryItem,
+    isDownloaded: Boolean = false,
+    transfer: TransferState? = null,
     onClick: () -> Unit,
+    onDownloadClick: () -> Unit = {},
 ) {
     val palette = LocalWearPalette.current
+    val isTransferring = transfer != null &&
+        transfer.status == WearTransferProgress.STATUS_TRANSFERRING
+
     Chip(
         label = {
             Text(
@@ -266,22 +287,49 @@ private fun SongChip(
         secondaryLabel = if (song.subtitle.isNotEmpty()) {
             {
                 Text(
-                    text = song.subtitle,
+                    text = if (isTransferring) {
+                        "${(transfer!!.progress * 100).toInt()}%"
+                    } else {
+                        song.subtitle
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = palette.textSecondary.copy(alpha = 0.78f),
+                    color = if (isTransferring) {
+                        palette.shuffleActive.copy(alpha = 0.9f)
+                    } else {
+                        palette.textSecondary.copy(alpha = 0.78f)
+                    },
                 )
             }
         } else null,
         icon = {
-            Icon(
-                imageVector = Icons.Rounded.MusicNote,
-                contentDescription = null,
-                tint = palette.textSecondary,
-                modifier = Modifier.size(18.dp),
-            )
+            when {
+                isDownloaded -> Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = "Downloaded",
+                    tint = palette.shuffleActive,
+                    modifier = Modifier.size(18.dp),
+                )
+                isTransferring -> CircularProgressIndicator(
+                    indicatorColor = palette.shuffleActive,
+                    trackColor = palette.chipContainer,
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+                else -> Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = palette.textSecondary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         },
-        onClick = onClick,
+        onClick = {
+            if (!isDownloaded && !isTransferring) {
+                onDownloadClick()
+            }
+            onClick()
+        },
         colors = ChipDefaults.chipColors(
             backgroundColor = palette.chipContainer,
             contentColor = palette.chipContent,

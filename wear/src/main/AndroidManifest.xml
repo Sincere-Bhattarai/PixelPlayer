@@ -15,13 +15,10 @@
             android:name="com.google.android.wearable"
             android:required="true" />
 
-        <!--
-            standalone=false: This app requires the phone companion to function (Phase 1).
-            Will change to true once standalone playback is implemented in Phase 3.
-        -->
+        <!-- standalone=true: Watch can play locally stored songs without the phone -->
         <meta-data
             android:name="com.google.android.wearable.standalone"
-            android:value="false" />
+            android:value="true" />
         <meta-data
             android:name="com.google.android.wearable.notificationBridgeMode"
             android:value="NO_BRIDGING" />
@@ -63,6 +60,34 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/browse_response" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/transfer_metadata" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/transfer_progress" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/transfer_request" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/transfer_audio" />
             </intent-filter>
         </service>
 

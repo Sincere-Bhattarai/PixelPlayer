@@ -237,6 +237,14 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/browse_request" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/transfer_request" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/transfer_cancel" />
             </intent-filter>
         </service>
 

@@ -17,6 +17,7 @@ import com.theveloper.pixelplay.shared.WearDataPaths
 import com.theveloper.pixelplay.shared.WearPlayerState
 import com.theveloper.pixelplay.shared.WearTransferMetadata
 import com.theveloper.pixelplay.shared.WearTransferProgress
+import com.theveloper.pixelplay.shared.WearTransferRequest
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -217,6 +218,17 @@ class WearDataListenerService : WearableListenerService() {
                     transferRepository.onProgressReceived(progress)
                 } catch (e: Exception) {
                     Timber.tag(TAG).e(e, "Failed to process transfer progress")
+                }
+            }
+
+            WearDataPaths.TRANSFER_REQUEST -> {
+                try {
+                    val requestJson = String(messageEvent.data, Charsets.UTF_8)
+                    val request = json.decodeFromString<WearTransferRequest>(requestJson)
+                    transferRepository.requestTransfer(request.songId)
+                    Timber.tag(TAG).d("Received phone transfer request for songId=${request.songId}")
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to process transfer request")
                 }
             }
 

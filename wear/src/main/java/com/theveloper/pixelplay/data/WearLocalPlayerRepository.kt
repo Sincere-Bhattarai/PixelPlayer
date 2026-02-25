@@ -128,6 +128,10 @@ class WearLocalPlayerRepository @Inject constructor(
         }
     }
 
+    fun pause() {
+        exoPlayer?.pause()
+    }
+
     fun next() {
         val player = exoPlayer ?: return
         if (player.hasNextMediaItem()) {
