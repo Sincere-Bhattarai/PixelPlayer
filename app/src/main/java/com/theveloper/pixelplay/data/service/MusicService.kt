@@ -412,12 +412,16 @@ class MusicService : MediaLibraryService() {
                 mediaItems: MutableList<MediaItem>
             ): ListenableFuture<MutableList<MediaItem>> {
                 return serviceScope.future {
-                    val resolvedItems = mediaItems.mapNotNull { requestedItem ->
-                        val songId = requestedItem.mediaId
-                        val song = musicRepository.getSong(songId).first()
-                        song?.let { MediaItemBuilder.build(it) }
+                    val songIds = mediaItems.map { it.mediaId }
+                    // Batch resolve songs from repository
+                    val songs = musicRepository.getSongsByIds(songIds).first()
+                    val songMap = songs.associateBy { it.id }
+
+                    mediaItems.map { requestedItem ->
+                        songMap[requestedItem.mediaId]?.let { song ->
+                            MediaItemBuilder.build(song)
+                        } ?: requestedItem
                     }.toMutableList()
-                    resolvedItems
                 }
             }
         }
