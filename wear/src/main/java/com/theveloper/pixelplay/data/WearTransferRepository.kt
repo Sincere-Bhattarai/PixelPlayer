@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -71,12 +72,23 @@ class WearTransferRepository @Inject constructor(
     private val _activeTransfers = MutableStateFlow<Map<String, TransferState>>(emptyMap())
     val activeTransfers: StateFlow<Map<String, TransferState>> = _activeTransfers.asStateFlow()
 
-    /** Set of song IDs that are already downloaded (reactive, from Room) */
-    val downloadedSongIds: Flow<Set<String>> = localSongDao.getAllSongIds()
-        .map { it.toSet() }
-
-    /** All locally stored songs */
+    /**
+     * All locally stored songs that still have a valid file on disk.
+     * Any stale DB rows (missing/empty files) are cleaned up automatically.
+     */
     val localSongs: Flow<List<LocalSongEntity>> = localSongDao.getAllSongs()
+        .transform { songs ->
+            val (validSongs, staleSongs) = songs.partition { it.hasPlayableLocalFile() }
+            if (staleSongs.isNotEmpty()) {
+                staleSongs.forEach { localSongDao.deleteById(it.songId) }
+                Timber.tag(TAG).w("Removed ${staleSongs.size} stale local song entries from DB")
+            }
+            emit(validSongs)
+        }
+
+    /** Set of song IDs that are already downloaded and still valid on disk */
+    val downloadedSongIds: Flow<Set<String>> = localSongs
+        .map { songs -> songs.map { it.songId }.toSet() }
 
     /** Pending metadata awaiting channel stream: requestId -> metadata */
     private val pendingMetadata = ConcurrentHashMap<String, WearTransferMetadata>()
@@ -309,5 +321,10 @@ class WearTransferRepository @Inject constructor(
         }
         songToRequestId.remove(songId)
         pendingMetadata.remove(requestId)
+    }
+
+    private fun LocalSongEntity.hasPlayableLocalFile(): Boolean {
+        val file = File(localPath)
+        return file.isFile && file.length() > 0L
     }
 }

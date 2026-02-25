@@ -95,8 +95,17 @@ class WearLocalPlayerRepository @Inject constructor(
      */
     fun playLocalSongs(songs: List<LocalSongEntity>, startIndex: Int = 0) {
         scope.launch {
+            val playableSongs = songs.filter { song ->
+                val file = File(song.localPath)
+                file.isFile && file.length() > 0L
+            }
+            if (playableSongs.isEmpty()) {
+                Timber.tag(TAG).w("No playable local files available")
+                return@launch
+            }
+
             val player = getOrCreatePlayer()
-            val mediaItems = songs.map { song ->
+            val mediaItems = playableSongs.map { song ->
                 MediaItem.Builder()
                     .setMediaId(song.songId)
                     .setUri(Uri.fromFile(File(song.localPath)))
@@ -109,12 +118,13 @@ class WearLocalPlayerRepository @Inject constructor(
                     )
                     .build()
             }
-            player.setMediaItems(mediaItems, startIndex, 0L)
+            val startIndexSafe = startIndex.coerceIn(0, mediaItems.lastIndex)
+            player.setMediaItems(mediaItems, startIndexSafe, 0L)
             player.prepare()
             player.play()
             _isLocalPlaybackActive.value = true
             Timber.tag(TAG).d(
-                "Playing locally: ${songs.getOrNull(startIndex)?.title}, queue=${songs.size}"
+                "Playing locally: ${playableSongs.getOrNull(startIndexSafe)?.title}, queue=${playableSongs.size}"
             )
         }
     }

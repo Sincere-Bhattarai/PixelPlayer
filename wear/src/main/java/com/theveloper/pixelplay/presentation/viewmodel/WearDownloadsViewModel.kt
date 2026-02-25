@@ -50,7 +50,8 @@ class WearDownloadsViewModel @Inject constructor(
      */
     fun playLocalSong(songId: String) {
         val allSongs = localSongs.value
-        val startIndex = allSongs.indexOfFirst { it.songId == songId }.coerceAtLeast(0)
+        val startIndex = allSongs.indexOfFirst { it.songId == songId }
+        if (startIndex == -1 || allSongs.isEmpty()) return
         localPlayerRepository.playLocalSongs(allSongs, startIndex)
         stateRepository.setOutputTarget(WearOutputTarget.WATCH)
     }

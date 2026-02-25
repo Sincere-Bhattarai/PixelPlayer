@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,7 +25,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -749,37 +749,52 @@ private fun UtilityPage(
     onVolumeClick: () -> Unit,
     onOutputClick: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 18.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize(),
     ) {
-        UtilityPillButton(
-            icon = Icons.Rounded.LibraryMusic,
-            label = "Library",
-            enabled = enabled,
-            onClick = onBrowseClick,
-        )
+        val maxSafeWidth = maxWidth - 10.dp
+        val middleWidth = (maxWidth * 0.84f).let { width ->
+            if (width > maxSafeWidth) maxSafeWidth else width
+        }
+        val sideWidth = (middleWidth * 0.82f).let { width ->
+            if (width < 128.dp) 128.dp else width
+        }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 30.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            UtilityPillButton(
+                icon = Icons.Rounded.PhoneAndroid,
+                label = "Output",
+                enabled = enabled,
+                width = sideWidth,
+                onClick = onOutputClick,
+            )
 
-        UtilityPillButton(
-            icon = Icons.AutoMirrored.Rounded.VolumeUp,
-            label = "Volume",
-            enabled = enabled,
-            onClick = onVolumeClick,
-        )
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Spacer(modifier = Modifier.height(10.dp))
+            UtilityPillButton(
+                icon = Icons.Rounded.LibraryMusic,
+                label = "Library",
+                enabled = enabled,
+                width = sideWidth,
+                onClick = onBrowseClick,
+            )
 
-        UtilityPillButton(
-            icon = Icons.Rounded.PhoneAndroid,
-            label = "Output",
-            enabled = enabled,
-            onClick = onOutputClick,
-        )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            UtilityPillButton(
+                icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                label = "Volume",
+                enabled = enabled,
+                width = middleWidth,
+                onClick = onVolumeClick,
+            )
+        }
     }
 }
 
@@ -788,6 +803,7 @@ private fun UtilityPillButton(
     icon: ImageVector,
     label: String,
     enabled: Boolean,
+    width: Dp,
     onClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
@@ -796,9 +812,8 @@ private fun UtilityPillButton(
 
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .widthIn(max = 190.dp)
-            .height(50.dp)
+            .width(width)
+            .height(46.dp)
             .clip(RoundedCornerShape(25.dp))
             .background(container)
             .clickable(enabled = enabled, onClick = onClick)
