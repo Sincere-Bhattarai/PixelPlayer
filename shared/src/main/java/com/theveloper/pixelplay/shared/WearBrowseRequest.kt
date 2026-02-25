@@ -17,6 +17,7 @@ data class WearBrowseRequest(
 ) {
     companion object {
         const val ROOT = "root"
+        const val QUEUE = "queue"
         const val ALBUMS = "albums"
         const val ARTISTS = "artists"
         const val PLAYLISTS = "playlists"

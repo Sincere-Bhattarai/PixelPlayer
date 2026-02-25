@@ -11,9 +11,11 @@ import com.theveloper.pixelplay.data.WearStateRepository
 import com.theveloper.pixelplay.data.WearVolumeRepository
 import com.theveloper.pixelplay.shared.WearPlayerState
 import com.theveloper.pixelplay.shared.WearVolumeState
+import kotlinx.coroutines.flow.MutableStateFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -36,6 +38,8 @@ class WearPlayerViewModel @Inject constructor(
     private val localPlayerRepository: WearLocalPlayerRepository,
     private val volumeRepository: WearVolumeRepository,
 ) : ViewModel() {
+    private val _sleepTimerUiState = MutableStateFlow(WearSleepTimerUiState())
+    val sleepTimerUiState: StateFlow<WearSleepTimerUiState> = _sleepTimerUiState.asStateFlow()
 
     /** Whether local playback is currently active on the watch */
     val isLocalPlaybackActive: StateFlow<Boolean> = localPlayerRepository.isLocalPlaybackActive
@@ -197,8 +201,44 @@ class WearPlayerViewModel @Inject constructor(
         }
     }
 
+    fun setSleepTimerDuration(durationMinutes: Int) {
+        if (durationMinutes <= 0 || !isPhoneConnected.value) return
+        playbackController.setSleepTimerDuration(durationMinutes)
+        _sleepTimerUiState.value = WearSleepTimerUiState(
+            mode = WearSleepTimerMode.DURATION,
+            durationMinutes = durationMinutes,
+        )
+    }
+
+    fun setSleepTimerEndOfTrack(enabled: Boolean = true) {
+        if (!isPhoneConnected.value) return
+        playbackController.setSleepTimerEndOfTrack(enabled)
+        _sleepTimerUiState.value = if (enabled) {
+            WearSleepTimerUiState(mode = WearSleepTimerMode.END_OF_TRACK)
+        } else {
+            WearSleepTimerUiState()
+        }
+    }
+
+    fun cancelSleepTimer() {
+        if (!isPhoneConnected.value) return
+        playbackController.cancelSleepTimer()
+        _sleepTimerUiState.value = WearSleepTimerUiState()
+    }
+
     /** Stop local playback and switch back to remote mode */
     fun stopLocalPlayback() {
         localPlayerRepository.release()
     }
+}
+
+data class WearSleepTimerUiState(
+    val mode: WearSleepTimerMode = WearSleepTimerMode.OFF,
+    val durationMinutes: Int = 0,
+)
+
+enum class WearSleepTimerMode {
+    OFF,
+    DURATION,
+    END_OF_TRACK,
 }

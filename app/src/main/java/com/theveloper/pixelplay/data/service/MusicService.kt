@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.data.service
 
+import android.app.AlarmManager
 import android.app.ForegroundServiceStartNotAllowedException
 import android.app.PendingIntent
 import android.content.ComponentName
@@ -110,6 +111,10 @@ class MusicService : MediaLibraryService() {
     private var countedPlayCount = 0
     private var countedOriginalId: String? = null
     private var countedPlayListener: Player.Listener? = null
+    private val alarmManager by lazy {
+        getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    }
+    private var endOfTrackTimerSongId: String? = null
 
     companion object {
         private const val TAG = "MusicService_PixelPlay"
@@ -246,7 +251,10 @@ class MusicService : MediaLibraryService() {
                     MusicNotificationProvider.CUSTOM_COMMAND_SHUFFLE_OFF,
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_SHUFFLE_STATE,
                     MusicNotificationProvider.CUSTOM_COMMAND_CYCLE_REPEAT_MODE,
-                    MusicNotificationProvider.CUSTOM_COMMAND_COUNTED_PLAY
+                    MusicNotificationProvider.CUSTOM_COMMAND_COUNTED_PLAY,
+                    MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_DURATION,
+                    MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_END_OF_TRACK,
+                    MusicNotificationProvider.CUSTOM_COMMAND_CANCEL_SLEEP_TIMER,
                 ).map { SessionCommand(it, Bundle.EMPTY) }
 
                 val sessionCommandsBuilder = SessionCommands.Builder()
@@ -274,6 +282,23 @@ class MusicService : MediaLibraryService() {
                     }
                     MusicNotificationProvider.CUSTOM_COMMAND_CANCEL_COUNTED_PLAY -> {
                         stopCountedPlay()
+                    }
+                    MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_DURATION -> {
+                        val minutes = args.getInt(
+                            MusicNotificationProvider.EXTRA_SLEEP_TIMER_MINUTES,
+                            0
+                        )
+                        setDurationSleepTimer(minutes)
+                    }
+                    MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_END_OF_TRACK -> {
+                        val enabled = args.getBoolean(
+                            MusicNotificationProvider.EXTRA_END_OF_TRACK_ENABLED,
+                            true
+                        )
+                        setEndOfTrackSleepTimer(enabled)
+                    }
+                    MusicNotificationProvider.CUSTOM_COMMAND_CANCEL_SLEEP_TIMER -> {
+                        cancelSleepTimers()
                     }
                     MusicNotificationProvider.CUSTOM_COMMAND_TOGGLE_SHUFFLE -> {
                         val enabled = !isManualShuffleEnabled
@@ -503,6 +528,87 @@ class MusicService : MediaLibraryService() {
         return true
     }
 
+    private fun createSleepTimerPendingIntent(): PendingIntent {
+        val intent = Intent(this, SleepTimerReceiver::class.java)
+        return PendingIntent.getBroadcast(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun cancelDurationSleepTimerInternal() {
+        alarmManager.cancel(createSleepTimerPendingIntent())
+    }
+
+    private fun setDurationSleepTimer(minutes: Int) {
+        if (minutes <= 0) {
+            cancelSleepTimers()
+            return
+        }
+        endOfTrackTimerSongId = null
+        val triggerAtMillis = System.currentTimeMillis() + (minutes * 60_000L)
+        val pendingIntent = createSleepTimerPendingIntent()
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent,
+                    )
+                } else {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent,
+                    )
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent,
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent,
+                )
+            }
+            Timber.tag(TAG).d("Sleep timer set from Wear for %d minutes", minutes)
+        } catch (e: SecurityException) {
+            Timber.tag(TAG).w(e, "Exact alarm denied; using inexact sleep timer")
+            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+        }
+    }
+
+    private fun setEndOfTrackSleepTimer(enabled: Boolean) {
+        if (!enabled) {
+            endOfTrackTimerSongId = null
+            Timber.tag(TAG).d("End-of-track timer disabled from Wear")
+            return
+        }
+        cancelDurationSleepTimerInternal()
+        val currentSongId = mediaSession?.player?.currentMediaItem?.mediaId
+        if (currentSongId.isNullOrBlank()) {
+            endOfTrackTimerSongId = null
+            Timber.tag(TAG).d("End-of-track timer ignored: no active song")
+            return
+        }
+        endOfTrackTimerSongId = currentSongId
+        Timber.tag(TAG).d("End-of-track timer set from Wear for mediaId=%s", currentSongId)
+    }
+
+    private fun cancelSleepTimers() {
+        cancelDurationSleepTimerInternal()
+        endOfTrackTimerSongId = null
+        Timber.tag(TAG).d("Sleep timers cancelled from Wear")
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.action?.let { action ->
             val player = mediaSession?.player ?: return@let
@@ -544,6 +650,7 @@ class MusicService : MediaLibraryService() {
                 }
                 ACTION_SLEEP_TIMER_EXPIRED -> {
                     Timber.tag(TAG).d("Sleep timer expired action received. Pausing player.")
+                    cancelDurationSleepTimerInternal()
                     player.pause()
                 }
             }
@@ -569,10 +676,34 @@ class MusicService : MediaLibraryService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             Timber.tag(TAG).d("Playback state changed: $playbackState")
+            if (playbackState == Player.STATE_ENDED) {
+                endOfTrackTimerSongId = null
+            }
             mediaSession?.let { refreshMediaSessionUi(it) }
         }
 
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+            val eotTargetSongId = endOfTrackTimerSongId
+            if (!eotTargetSongId.isNullOrBlank()) {
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                    val previousSongId = engine.masterPlayer.run {
+                        if (previousMediaItemIndex != C.INDEX_UNSET) {
+                            runCatching { getMediaItemAt(previousMediaItemIndex).mediaId }.getOrNull()
+                        } else {
+                            null
+                        }
+                    }
+                    if (previousSongId == eotTargetSongId) {
+                        endOfTrackTimerSongId = null
+                        engine.masterPlayer.seekTo(0L)
+                        engine.masterPlayer.pause()
+                        Timber.tag(TAG).d("Paused playback at end of track from Wear timer")
+                    }
+                } else if (item?.mediaId != eotTargetSongId) {
+                    endOfTrackTimerSongId = null
+                    Timber.tag(TAG).d("Cleared end-of-track timer after manual track change")
+                }
+            }
             requestWidgetAndWearRefreshWithFollowUp()
             mediaSession?.let { refreshMediaSessionUi(it) }
         }

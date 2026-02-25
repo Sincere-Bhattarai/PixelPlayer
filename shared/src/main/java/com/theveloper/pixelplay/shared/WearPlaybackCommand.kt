@@ -17,6 +17,10 @@ data class WearPlaybackCommand(
     val contextType: String? = null,
     /** Context ID for PLAY_FROM_CONTEXT: albumId, artistId, playlistId */
     val contextId: String? = null,
+    /** Queue index used by PLAY_QUEUE_INDEX action. */
+    val queueIndex: Int? = null,
+    /** Minutes used by SET_SLEEP_TIMER_DURATION action. */
+    val durationMinutes: Int? = null,
 ) {
     companion object {
         const val PLAY = "play"
@@ -35,5 +39,13 @@ data class WearPlaybackCommand(
         const val PLAY_NEXT_FROM_CONTEXT = "play_next_from_context"
         /** Append a song to the end of the active queue. */
         const val ADD_TO_QUEUE_FROM_CONTEXT = "add_to_queue_from_context"
+        /** Jump to a specific queue index and play. */
+        const val PLAY_QUEUE_INDEX = "play_queue_index"
+        /** Set sleep timer for a duration in minutes. */
+        const val SET_SLEEP_TIMER_DURATION = "set_sleep_timer_duration"
+        /** Enable/disable end-of-track sleep timer. */
+        const val SET_SLEEP_TIMER_END_OF_TRACK = "set_sleep_timer_end_of_track"
+        /** Cancel any active sleep timer. */
+        const val CANCEL_SLEEP_TIMER = "cancel_sleep_timer"
     }
 }

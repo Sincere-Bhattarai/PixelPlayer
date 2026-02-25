@@ -62,7 +62,7 @@ fun OutputScreen(
 
             item {
                 Text(
-                    text = "Output",
+                    text = "Device",
                     style = MaterialTheme.typography.title2,
                     color = palette.textPrimary,
                     textAlign = TextAlign.Center,

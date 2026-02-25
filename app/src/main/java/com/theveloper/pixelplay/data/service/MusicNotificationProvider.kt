@@ -12,4 +12,9 @@ object MusicNotificationProvider {
     const val EXTRA_FAVORITE_ENABLED = "com.theveloper.pixelplay.extra.FAVORITE_ENABLED"
     const val CUSTOM_COMMAND_COUNTED_PLAY = "com.theveloper.pixelplay.COUNTED_PLAY"
     const val CUSTOM_COMMAND_CANCEL_COUNTED_PLAY = "com.theveloper.pixelplay.CANCEL_COUNTED_PLAY"
+    const val CUSTOM_COMMAND_SET_SLEEP_TIMER_DURATION = "com.theveloper.pixelplay.SET_SLEEP_TIMER_DURATION"
+    const val CUSTOM_COMMAND_SET_SLEEP_TIMER_END_OF_TRACK = "com.theveloper.pixelplay.SET_SLEEP_TIMER_END_OF_TRACK"
+    const val CUSTOM_COMMAND_CANCEL_SLEEP_TIMER = "com.theveloper.pixelplay.CANCEL_SLEEP_TIMER"
+    const val EXTRA_SLEEP_TIMER_MINUTES = "com.theveloper.pixelplay.extra.SLEEP_TIMER_MINUTES"
+    const val EXTRA_END_OF_TRACK_ENABLED = "com.theveloper.pixelplay.extra.END_OF_TRACK_ENABLED"
 }

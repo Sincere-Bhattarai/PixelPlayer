@@ -11,7 +11,9 @@ import com.theveloper.pixelplay.presentation.screens.DownloadsScreen
 import com.theveloper.pixelplay.presentation.screens.LibraryListScreen
 import com.theveloper.pixelplay.presentation.screens.OutputScreen
 import com.theveloper.pixelplay.presentation.screens.PlayerScreen
+import com.theveloper.pixelplay.presentation.screens.QueueScreen
 import com.theveloper.pixelplay.presentation.screens.SongListScreen
+import com.theveloper.pixelplay.presentation.screens.TimerScreen
 import com.theveloper.pixelplay.presentation.screens.VolumeScreen
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -29,6 +31,8 @@ object WearScreens {
     const val PLAYER = "player"
     const val VOLUME = "volume"
     const val OUTPUT = "output"
+    const val QUEUE = "queue"
+    const val TIMER = "timer"
     const val BROWSE = "browse"
     const val DOWNLOADS = "downloads"
     const val LIBRARY_LIST = "library_list/{browseType}/{title}"
@@ -66,6 +70,11 @@ fun WearNavigation() {
                         launchSingleTop = true
                     }
                 },
+                onQueueClick = {
+                    navController.navigate(WearScreens.QUEUE) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 
@@ -75,6 +84,20 @@ fun WearNavigation() {
 
         composable(WearScreens.OUTPUT) {
             OutputScreen()
+        }
+
+        composable(WearScreens.QUEUE) {
+            QueueScreen(
+                onTimerClick = {
+                    navController.navigate(WearScreens.TIMER) {
+                        launchSingleTop = true
+                    }
+                },
+            )
+        }
+
+        composable(WearScreens.TIMER) {
+            TimerScreen()
         }
 
         composable(WearScreens.DOWNLOADS) {

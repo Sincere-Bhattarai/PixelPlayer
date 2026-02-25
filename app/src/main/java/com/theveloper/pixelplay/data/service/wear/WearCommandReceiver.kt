@@ -43,6 +43,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -53,6 +54,7 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import kotlin.coroutines.resume
 
 /**
  * WearableListenerService that receives commands from the Wear OS watch app.
@@ -121,6 +123,14 @@ class WearCommandReceiver : WearableListenerService() {
             WearPlaybackCommand.ADD_TO_QUEUE_FROM_CONTEXT -> {
                 handleInsertIntoQueue(command, playNext = false)
             }
+            WearPlaybackCommand.PLAY_QUEUE_INDEX -> {
+                handlePlayQueueIndex(command)
+            }
+            WearPlaybackCommand.SET_SLEEP_TIMER_DURATION,
+            WearPlaybackCommand.SET_SLEEP_TIMER_END_OF_TRACK,
+            WearPlaybackCommand.CANCEL_SLEEP_TIMER -> {
+                handleSleepTimerCommand(command)
+            }
             else -> {
                 getOrBuildMediaController { controller ->
                     when (command.action) {
@@ -171,6 +181,74 @@ class WearCommandReceiver : WearableListenerService() {
                         else -> Timber.tag(TAG).w("Unknown playback action: ${command.action}")
                     }
                 }
+            }
+        }
+    }
+
+    private fun handlePlayQueueIndex(command: WearPlaybackCommand) {
+        val index = command.queueIndex
+        if (index == null || index < 0) {
+            Timber.tag(TAG).w("PLAY_QUEUE_INDEX missing/invalid index: ${command.queueIndex}")
+            return
+        }
+        getOrBuildMediaController { controller ->
+            val itemCount = controller.mediaItemCount
+            if (index >= itemCount) {
+                Timber.tag(TAG).w("PLAY_QUEUE_INDEX out of bounds: index=$index count=$itemCount")
+                return@getOrBuildMediaController
+            }
+            controller.seekTo(index, C.TIME_UNSET)
+            controller.play()
+            Timber.tag(TAG).d("Jumped to queue index=$index from wear")
+        }
+    }
+
+    private fun handleSleepTimerCommand(command: WearPlaybackCommand) {
+        getOrBuildMediaController { controller ->
+            when (command.action) {
+                WearPlaybackCommand.SET_SLEEP_TIMER_DURATION -> {
+                    val minutes = command.durationMinutes ?: 0
+                    if (minutes <= 0) {
+                        Timber.tag(TAG).w("SET_SLEEP_TIMER_DURATION requires positive minutes")
+                        return@getOrBuildMediaController
+                    }
+                    val args = Bundle().apply {
+                        putInt(MusicNotificationProvider.EXTRA_SLEEP_TIMER_MINUTES, minutes)
+                    }
+                    controller.sendCustomCommand(
+                        SessionCommand(
+                            MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_DURATION,
+                            Bundle.EMPTY
+                        ),
+                        args
+                    )
+                }
+
+                WearPlaybackCommand.SET_SLEEP_TIMER_END_OF_TRACK -> {
+                    val enabled = command.targetEnabled ?: true
+                    val args = Bundle().apply {
+                        putBoolean(MusicNotificationProvider.EXTRA_END_OF_TRACK_ENABLED, enabled)
+                    }
+                    controller.sendCustomCommand(
+                        SessionCommand(
+                            MusicNotificationProvider.CUSTOM_COMMAND_SET_SLEEP_TIMER_END_OF_TRACK,
+                            Bundle.EMPTY
+                        ),
+                        args
+                    )
+                }
+
+                WearPlaybackCommand.CANCEL_SLEEP_TIMER -> {
+                    controller.sendCustomCommand(
+                        SessionCommand(
+                            MusicNotificationProvider.CUSTOM_COMMAND_CANCEL_SLEEP_TIMER,
+                            Bundle.EMPTY
+                        ),
+                        Bundle.EMPTY
+                    )
+                }
+
+                else -> Unit
             }
         }
     }
@@ -411,6 +489,10 @@ class WearCommandReceiver : WearableListenerService() {
                     .map { song -> song.toWearLibraryItem() }
             }
 
+            WearBrowseRequest.QUEUE -> {
+                getQueueItems()
+            }
+
             WearBrowseRequest.ALBUM_SONGS -> {
                 val albumId = contextId?.toLongOrNull()
                     ?: throw IllegalArgumentException("Missing albumId for ALBUM_SONGS")
@@ -442,6 +524,54 @@ class WearCommandReceiver : WearableListenerService() {
             else -> {
                 Timber.tag(TAG).w("Unknown browse type: $browseType")
                 emptyList()
+            }
+        }
+    }
+
+    private suspend fun getQueueItems(): List<WearLibraryItem> = suspendCancellableCoroutine { continuation ->
+        getOrBuildMediaController { controller ->
+            try {
+                val currentIndex = controller.currentMediaItemIndex
+                val count = controller.mediaItemCount
+                val items = buildList {
+                    for (index in 0 until count) {
+                        val mediaItem = controller.getMediaItemAt(index)
+                        val metadata = mediaItem.mediaMetadata
+                        val title = metadata.title?.toString()?.takeIf { it.isNotBlank() }
+                            ?: mediaItem.mediaId.takeIf { it.isNotBlank() }
+                            ?: "Track ${index + 1}"
+                        val artist = metadata.artist?.toString().orEmpty()
+                            .ifBlank { metadata.albumArtist?.toString().orEmpty() }
+                        val album = metadata.albumTitle?.toString().orEmpty()
+                        val info = when {
+                            artist.isNotBlank() && album.isNotBlank() -> "$artist · $album"
+                            artist.isNotBlank() -> artist
+                            album.isNotBlank() -> album
+                            else -> ""
+                        }
+                        val subtitle = if (index == currentIndex) {
+                            if (info.isBlank()) "Playing" else "Playing · $info"
+                        } else {
+                            info
+                        }
+                        add(
+                            WearLibraryItem(
+                                id = index.toString(),
+                                title = title,
+                                subtitle = subtitle,
+                                type = WearLibraryItem.TYPE_SONG,
+                            )
+                        )
+                    }
+                }
+                if (continuation.isActive) {
+                    continuation.resume(items)
+                }
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Failed to build queue browse items")
+                if (continuation.isActive) {
+                    continuation.resume(emptyList())
+                }
             }
         }
     }

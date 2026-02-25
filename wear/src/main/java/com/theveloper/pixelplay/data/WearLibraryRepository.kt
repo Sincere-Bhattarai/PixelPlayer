@@ -57,14 +57,17 @@ class WearLibraryRepository @Inject constructor(
      */
     suspend fun browse(browseType: String, contextId: String? = null): WearBrowseResponse {
         val cacheKey = "$browseType:${contextId.orEmpty()}"
+        val useCache = browseType != WearBrowseRequest.QUEUE
 
-        // Check cache first
-        cache[cacheKey]?.let { (timestamp, response) ->
-            if (System.currentTimeMillis() - timestamp < CACHE_TTL_MS) {
-                Timber.tag(TAG).d("Cache hit for $cacheKey (${response.items.size} items)")
-                return response
-            } else {
-                cache.remove(cacheKey)
+        if (useCache) {
+            // Check cache first
+            cache[cacheKey]?.let { (timestamp, response) ->
+                if (System.currentTimeMillis() - timestamp < CACHE_TTL_MS) {
+                    Timber.tag(TAG).d("Cache hit for $cacheKey (${response.items.size} items)")
+                    return response
+                } else {
+                    cache.remove(cacheKey)
+                }
             }
         }
 
@@ -104,7 +107,7 @@ class WearLibraryRepository @Inject constructor(
             }
 
             // Cache successful responses
-            if (response.error == null) {
+            if (useCache && response.error == null) {
                 cache[cacheKey] = System.currentTimeMillis() to response
             }
 

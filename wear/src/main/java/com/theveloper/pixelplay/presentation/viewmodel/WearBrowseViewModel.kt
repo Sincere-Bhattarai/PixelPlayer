@@ -73,6 +73,10 @@ class WearBrowseViewModel @Inject constructor(
         playbackController.addToQueueFromContext(songId, contextType, contextId)
     }
 
+    fun playQueueIndex(index: Int) {
+        playbackController.playQueueIndex(index)
+    }
+
     /**
      * Refresh current browse data by invalidating cache and reloading.
      */

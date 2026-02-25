@@ -101,6 +101,33 @@ class WearPlaybackController @Inject constructor(
         )
     )
 
+    fun playQueueIndex(index: Int) = sendCommand(
+        WearPlaybackCommand(
+            action = WearPlaybackCommand.PLAY_QUEUE_INDEX,
+            queueIndex = index,
+        )
+    )
+
+    fun setSleepTimerDuration(durationMinutes: Int) = sendCommand(
+        WearPlaybackCommand(
+            action = WearPlaybackCommand.SET_SLEEP_TIMER_DURATION,
+            durationMinutes = durationMinutes,
+        )
+    )
+
+    fun setSleepTimerEndOfTrack(enabled: Boolean = true) = sendCommand(
+        WearPlaybackCommand(
+            action = WearPlaybackCommand.SET_SLEEP_TIMER_END_OF_TRACK,
+            targetEnabled = enabled,
+        )
+    )
+
+    fun cancelSleepTimer() = sendCommand(
+        WearPlaybackCommand(
+            action = WearPlaybackCommand.CANCEL_SLEEP_TIMER,
+        )
+    )
+
     private suspend fun sendMessageToPhone(path: String, data: ByteArray) {
         try {
             val nodes = nodeClient.connectedNodes.await()
