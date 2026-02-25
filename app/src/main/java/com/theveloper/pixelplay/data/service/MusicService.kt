@@ -94,6 +94,11 @@ class MusicService : MediaLibraryService() {
     lateinit var colorSchemeProcessor: ColorSchemeProcessor
     @Inject
     lateinit var autoMediaBrowseTree: AutoMediaBrowseTree
+    @Inject
+    lateinit var replayGainManager: com.theveloper.pixelplay.data.media.ReplayGainManager
+
+    private var replayGainEnabled = false
+    private var replayGainUseAlbumGain = false
 
     private var favoriteSongIds = emptySet<String>()
     private var mediaSession: MediaLibraryService.MediaLibrarySession? = null
@@ -201,6 +206,22 @@ class MusicService : MediaLibraryService() {
         serviceScope.launch {
             userPreferencesRepository.persistentShuffleEnabledFlow.collect { enabled ->
                 persistentShuffleEnabled = enabled
+            }
+        }
+
+        // ReplayGain preference collectors
+        serviceScope.launch {
+            userPreferencesRepository.replayGainEnabledFlow.collect { enabled ->
+                replayGainEnabled = enabled
+                // Re-apply to current track when toggled
+                applyReplayGain(mediaSession?.player?.currentMediaItem)
+            }
+        }
+        serviceScope.launch {
+            userPreferencesRepository.replayGainUseAlbumGainFlow.collect { useAlbum ->
+                replayGainUseAlbumGain = useAlbum
+                // Re-apply to current track when mode changes
+                applyReplayGain(mediaSession?.player?.currentMediaItem)
             }
         }
 
@@ -528,6 +549,8 @@ class MusicService : MediaLibraryService() {
         override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
             requestWidgetFullUpdate(force = true)
             mediaSession?.let { refreshMediaSessionUi(it) }
+            // Apply ReplayGain volume adjustment for the new track
+            applyReplayGain(item)
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -544,6 +567,51 @@ class MusicService : MediaLibraryService() {
 
         override fun onPlayerError(error: PlaybackException) {
             Timber.tag(TAG).e(error, "Error en el reproductor: ")
+        }
+    }
+
+    /**
+     * Applies ReplayGain volume normalization to the current track.
+     * Reads RG tags from the file and adjusts player.volume accordingly.
+     */
+    private fun applyReplayGain(mediaItem: MediaItem?) {
+        val player = engine.masterPlayer
+        if (!replayGainEnabled || mediaItem == null) {
+            // Reset to full volume when disabled
+            if (!engine.isTransitionRunning()) {
+                player.volume = 1f
+            }
+            return
+        }
+
+        val filePath = mediaItem.mediaMetadata?.extras
+            ?.getString(com.theveloper.pixelplay.utils.MediaItemBuilder.EXTERNAL_EXTRA_FILE_PATH)
+
+        if (filePath.isNullOrBlank()) {
+            Timber.tag(TAG).d("ReplayGain: No file path for track, keeping volume at 1.0")
+            if (!engine.isTransitionRunning()) {
+                player.volume = 1f
+            }
+            return
+        }
+
+        // Read ReplayGain tags on IO thread to avoid blocking main
+        serviceScope.launch {
+            val rgValues = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                replayGainManager.readReplayGain(filePath)
+            }
+
+            val volume = replayGainManager.getVolumeMultiplier(
+                rgValues,
+                useAlbumGain = replayGainUseAlbumGain
+            )
+
+            // Only apply if we're not mid-crossfade
+            if (!engine.isTransitionRunning()) {
+                player.volume = volume
+                Timber.tag(TAG).d("ReplayGain: Applied volume=%.2f for %s",
+                    volume, mediaItem.mediaMetadata?.title)
+            }
         }
     }
 

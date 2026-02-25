@@ -84,7 +84,9 @@ data class SettingsUiState(
     val isInspectingBackup: Boolean = false,
     val collagePattern: CollagePattern = CollagePattern.default,
     val collageAutoRotate: Boolean = false,
-    val minSongDuration: Int = 10000
+    val minSongDuration: Int = 10000,
+    val replayGainEnabled: Boolean = false,
+    val replayGainUseAlbumGain: Boolean = false
 )
 
 data class FailedSongInfo(
@@ -369,6 +371,18 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(minSongDuration = duration) }
             }
         }
+
+        viewModelScope.launch {
+            userPreferencesRepository.replayGainEnabledFlow.collect { enabled ->
+                _uiState.update { it.copy(replayGainEnabled = enabled) }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.replayGainUseAlbumGainFlow.collect { useAlbum ->
+                _uiState.update { it.copy(replayGainUseAlbumGain = useAlbum) }
+            }
+        }
     }
 
     fun setAppRebrandDialogShown(wasShown: Boolean) {
@@ -642,6 +656,18 @@ class SettingsViewModel @Inject constructor(
             userPreferencesRepository.setMinSongDuration(durationMs)
             // Trigger a library rescan so the change takes effect in the database
             syncManager.forceRefresh()
+        }
+    }
+
+    fun setReplayGainEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setReplayGainEnabled(enabled)
+        }
+    }
+
+    fun setReplayGainUseAlbumGain(useAlbumGain: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setReplayGainUseAlbumGain(useAlbumGain)
         }
     }
 

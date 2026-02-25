@@ -24,6 +24,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
@@ -662,6 +664,29 @@ fun SettingsCategoryScreen(
                                     },
                                     leadingIcon = { Icon(painterResource(R.drawable.rounded_all_inclusive_24), null, tint = MaterialTheme.colorScheme.secondary) }
                                 )
+                            }
+
+                            SettingsSubsection(title = "Volume Normalization (ReplayGain)") {
+                                SwitchSettingItem(
+                                    title = "Enable ReplayGain",
+                                    subtitle = "Normalize volume levels using ReplayGain metadata from audio files.",
+                                    checked = uiState.replayGainEnabled,
+                                    onCheckedChange = { settingsViewModel.setReplayGainEnabled(it) }
+                                )
+                                AnimatedVisibility(
+                                    visible = uiState.replayGainEnabled,
+                                    enter = expandVertically(animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f)) + fadeIn(animationSpec = spring(stiffness = 400f)),
+                                    exit = shrinkVertically(animationSpec = spring(stiffness = 500f)) + fadeOut(animationSpec = spring(stiffness = 500f))
+                                ) {
+                                    ThemeSelectorItem(
+                                        label = "Gain Mode",
+                                        description = "Track: normalize each song. Album: normalize per album.",
+                                        options = mapOf("track" to "Track", "album" to "Album"),
+                                        selectedKey = if (uiState.replayGainUseAlbumGain) "album" else "track",
+                                        onSelectionChanged = { settingsViewModel.setReplayGainUseAlbumGain(it == "album") },
+                                        leadingIcon = { Icon(painterResource(R.drawable.rounded_volume_down_24), null, tint = MaterialTheme.colorScheme.secondary) }
+                                    )
+                                }
                             }
 
                             SettingsSubsection(title = "Cast") {

@@ -207,6 +207,10 @@ constructor(
 
         // Smart Duration Filtering
         val MIN_SONG_DURATION = intPreferencesKey("min_song_duration_ms")
+
+        // ReplayGain
+        val REPLAYGAIN_ENABLED = booleanPreferencesKey("replaygain_enabled")
+        val REPLAYGAIN_USE_ALBUM_GAIN = booleanPreferencesKey("replaygain_use_album_gain")
     }
 
     val appRebrandDialogShownFlow: Flow<Boolean> =
@@ -724,6 +728,32 @@ constructor(
     }
 
     // ===== End Smart Duration Filtering =====
+
+    // ===== ReplayGain =====
+
+    val replayGainEnabledFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_ENABLED] ?: false
+        }
+
+    val replayGainUseAlbumGainFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_USE_ALBUM_GAIN] ?: false
+        }
+
+    suspend fun setReplayGainEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setReplayGainUseAlbumGain(useAlbumGain: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_USE_ALBUM_GAIN] = useAlbumGain
+        }
+    }
+
+    // ===== End ReplayGain =====
 
     val allowedDirectoriesFlow: Flow<Set<String>> =
             dataStore.data.map { preferences ->
