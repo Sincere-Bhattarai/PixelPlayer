@@ -766,7 +766,7 @@ private fun UtilityPage(
         ) {
             UtilityPillButton(
                 icon = Icons.Rounded.PhoneAndroid,
-                label = "Output",
+                label = "Device",
                 enabled = enabled,
                 width = sideWidth,
                 onClick = onOutputClick,
