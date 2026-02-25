@@ -2,7 +2,11 @@ package com.theveloper.pixelplay.data.service.wear
 
 import android.content.ComponentName
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.AudioManager
+import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -72,6 +76,7 @@ class WearCommandReceiver : WearableListenerService() {
 
     /** Set of requestIds that have been cancelled by the watch */
     private val cancelledTransfers = ConcurrentHashMap.newKeySet<String>()
+    private val albumPaletteSeedCache = ConcurrentHashMap<Long, Int>()
 
     companion object {
         private const val TAG = "WearCommandReceiver"
@@ -559,6 +564,7 @@ class WearCommandReceiver : WearableListenerService() {
                 }
 
                 val fileSize = getSongFileSize(song)
+                val paletteSeedArgb = resolvePaletteSeedArgb(song)
 
                 // 4. Send metadata to watch
                 val metadata = WearTransferMetadata(
@@ -573,6 +579,7 @@ class WearCommandReceiver : WearableListenerService() {
                     fileSize = fileSize,
                     bitrate = song.bitrate ?: 0,
                     sampleRate = song.sampleRate ?: 0,
+                    paletteSeedArgb = paletteSeedArgb,
                 )
                 val metadataBytes = json.encodeToString(metadata).toByteArray(Charsets.UTF_8)
                 val msgClient = Wearable.getMessageClient(this@WearCommandReceiver)
@@ -650,6 +657,110 @@ class WearCommandReceiver : WearableListenerService() {
         } catch (e: Exception) {
             0L
         }
+    }
+
+    /**
+     * Resolve palette seed from album art with album-level cache to avoid repeated extraction work
+     * across transfers of songs in the same album.
+     */
+    private fun resolvePaletteSeedArgb(song: Song): Int? {
+        if (song.albumId > 0L) {
+            albumPaletteSeedCache[song.albumId]?.let { return it }
+        }
+
+        val bitmap = loadSongAlbumArtBitmap(song) ?: return null
+        return try {
+            extractSeedColorArgb(bitmap)?.also { seed ->
+                if (song.albumId > 0L) {
+                    albumPaletteSeedCache[song.albumId] = seed
+                }
+            }
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun loadSongAlbumArtBitmap(song: Song): Bitmap? {
+        val artFromUri = song.albumArtUriString
+            ?.takeIf { it.isNotBlank() }
+            ?.let { uriString ->
+                runCatching {
+                    contentResolver.openInputStream(uriString.toUri())?.use { input ->
+                        BitmapFactory.decodeStream(
+                            input,
+                            null,
+                            BitmapFactory.Options().apply {
+                                inPreferredConfig = Bitmap.Config.RGB_565
+                                inSampleSize = 4
+                            },
+                        )
+                    }
+                }.getOrNull()
+            }
+        if (artFromUri != null) return artFromUri
+
+        val retriever = MediaMetadataRetriever()
+        return try {
+            val file = File(song.path)
+            if (file.exists() && file.canRead()) {
+                retriever.setDataSource(song.path)
+            } else {
+                retriever.setDataSource(this, song.contentUriString.toUri())
+            }
+            val embedded = retriever.embeddedPicture ?: return null
+            BitmapFactory.decodeByteArray(
+                embedded,
+                0,
+                embedded.size,
+                BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                    inSampleSize = 2
+                },
+            )
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to extract album art for palette seed: songId=${song.id}")
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun extractSeedColorArgb(bitmap: Bitmap): Int? {
+        if (bitmap.width <= 0 || bitmap.height <= 0) return null
+
+        val step = (minOf(bitmap.width, bitmap.height) / 24).coerceAtLeast(1)
+        var redSum = 0L
+        var greenSum = 0L
+        var blueSum = 0L
+        var count = 0L
+
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                val pixel = bitmap.getPixel(x, y)
+                if (Color.alpha(pixel) >= 28) {
+                    val red = Color.red(pixel)
+                    val green = Color.green(pixel)
+                    val blue = Color.blue(pixel)
+                    if (red + green + blue > 36) {
+                        redSum += red
+                        greenSum += green
+                        blueSum += blue
+                        count++
+                    }
+                }
+                x += step
+            }
+            y += step
+        }
+
+        if (count == 0L) return null
+        return Color.rgb(
+            (redSum / count).toInt(),
+            (greenSum / count).toInt(),
+            (blueSum / count).toInt(),
+        )
     }
 
     /**

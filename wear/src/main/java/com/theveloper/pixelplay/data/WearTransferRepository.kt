@@ -243,6 +243,7 @@ class WearTransferRepository @Inject constructor(
                     fileSize = actualSize,
                     bitrate = metadata.bitrate,
                     sampleRate = metadata.sampleRate,
+                    paletteSeedArgb = metadata.paletteSeedArgb,
                     localPath = localFile.absolutePath,
                     transferredAt = System.currentTimeMillis(),
                 )

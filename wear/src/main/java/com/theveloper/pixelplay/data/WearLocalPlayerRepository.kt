@@ -1,6 +1,10 @@
 package com.theveloper.pixelplay.data
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -18,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
@@ -59,7 +64,12 @@ class WearLocalPlayerRepository @Inject constructor(
     private val _isLocalPlaybackActive = MutableStateFlow(false)
     val isLocalPlaybackActive: StateFlow<Boolean> = _isLocalPlaybackActive.asStateFlow()
 
+    private val _localPaletteSeedArgb = MutableStateFlow<Int?>(null)
+    val localPaletteSeedArgb: StateFlow<Int?> = _localPaletteSeedArgb.asStateFlow()
+
     private var positionUpdateJob: Job? = null
+    private var currentQueueSongsById: Map<String, LocalSongEntity> = emptyMap()
+    private var lastPaletteSongId: String = ""
 
     companion object {
         private const val TAG = "WearLocalPlayer"
@@ -105,6 +115,7 @@ class WearLocalPlayerRepository @Inject constructor(
             }
 
             val player = getOrCreatePlayer()
+            currentQueueSongsById = playableSongs.associateBy { it.songId }
             val mediaItems = playableSongs.map { song ->
                 MediaItem.Builder()
                     .setMediaId(song.songId)
@@ -123,6 +134,7 @@ class WearLocalPlayerRepository @Inject constructor(
             player.prepare()
             player.play()
             _isLocalPlaybackActive.value = true
+            updateState()
             Timber.tag(TAG).d(
                 "Playing locally: ${playableSongs.getOrNull(startIndexSafe)?.title}, queue=${playableSongs.size}"
             )
@@ -169,6 +181,9 @@ class WearLocalPlayerRepository @Inject constructor(
         exoPlayer = null
         _isLocalPlaybackActive.value = false
         _localPlayerState.value = WearLocalPlayerState()
+        _localPaletteSeedArgb.value = null
+        currentQueueSongsById = emptyMap()
+        lastPaletteSongId = ""
         Timber.tag(TAG).d("ExoPlayer released")
     }
 
@@ -184,6 +199,7 @@ class WearLocalPlayerRepository @Inject constructor(
             currentPositionMs = player.currentPosition,
             totalDurationMs = player.duration.coerceAtLeast(0L),
         )
+        updatePaletteForSong(currentItem?.mediaId.orEmpty())
     }
 
     private fun startPositionUpdates() {
@@ -199,5 +215,111 @@ class WearLocalPlayerRepository @Inject constructor(
     private fun stopPositionUpdates() {
         positionUpdateJob?.cancel()
         positionUpdateJob = null
+    }
+
+    private fun updatePaletteForSong(songId: String) {
+        if (songId.isBlank()) {
+            lastPaletteSongId = ""
+            _localPaletteSeedArgb.value = null
+            return
+        }
+        if (songId == lastPaletteSongId) return
+        lastPaletteSongId = songId
+
+        val queueSong = currentQueueSongsById[songId]
+        val cachedSeed = queueSong?.paletteSeedArgb
+        if (cachedSeed != null) {
+            _localPaletteSeedArgb.value = cachedSeed
+            return
+        }
+
+        _localPaletteSeedArgb.value = null
+        if (queueSong == null) return
+
+        scope.launch(Dispatchers.IO) {
+            val extractedSeed = extractSeedFromLocalSong(queueSong)
+            if (extractedSeed != null) {
+                runCatching { localSongDao.updatePaletteSeed(queueSong.songId, extractedSeed) }
+                    .onFailure { error ->
+                        Timber.tag(TAG).w(error, "Failed to persist local palette seed")
+                    }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (lastPaletteSongId != queueSong.songId) return@withContext
+                if (extractedSeed != null) {
+                    currentQueueSongsById = currentQueueSongsById.toMutableMap().apply {
+                        put(queueSong.songId, queueSong.copy(paletteSeedArgb = extractedSeed))
+                    }
+                }
+                _localPaletteSeedArgb.value = extractedSeed
+            }
+        }
+    }
+
+    private fun extractSeedFromLocalSong(song: LocalSongEntity): Int? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(song.localPath)
+            val embedded = retriever.embeddedPicture ?: return null
+            val bitmap = BitmapFactory.decodeByteArray(
+                embedded,
+                0,
+                embedded.size,
+                BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                    inSampleSize = 2
+                },
+            ) ?: return null
+
+            try {
+                extractSeedColorArgb(bitmap)
+            } finally {
+                bitmap.recycle()
+            }
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to extract local artwork seed for songId=${song.songId}")
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun extractSeedColorArgb(bitmap: Bitmap): Int? {
+        if (bitmap.width <= 0 || bitmap.height <= 0) return null
+
+        val step = (minOf(bitmap.width, bitmap.height) / 24).coerceAtLeast(1)
+        var redSum = 0L
+        var greenSum = 0L
+        var blueSum = 0L
+        var count = 0L
+
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                val pixel = bitmap.getPixel(x, y)
+                if (Color.alpha(pixel) >= 28) {
+                    val red = Color.red(pixel)
+                    val green = Color.green(pixel)
+                    val blue = Color.blue(pixel)
+                    if (red + green + blue > 36) {
+                        redSum += red
+                        greenSum += green
+                        blueSum += blue
+                        count++
+                    }
+                }
+                x += step
+            }
+            y += step
+        }
+
+        if (count == 0L) return null
+        return Color.rgb(
+            (redSum / count).toInt(),
+            (greenSum / count).toInt(),
+            (blueSum / count).toInt(),
+        )
     }
 }

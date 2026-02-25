@@ -24,6 +24,9 @@ interface LocalSongDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(song: LocalSongEntity)
 
+    @Query("UPDATE local_songs SET paletteSeedArgb = :paletteSeedArgb WHERE songId = :songId")
+    suspend fun updatePaletteSeed(songId: String, paletteSeedArgb: Int)
+
     @Query("DELETE FROM local_songs WHERE songId = :songId")
     suspend fun deleteById(songId: String)
 

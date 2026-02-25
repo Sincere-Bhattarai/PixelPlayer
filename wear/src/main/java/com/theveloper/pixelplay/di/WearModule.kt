@@ -46,7 +46,9 @@ object WearModule {
             application,
             WearMusicDatabase::class.java,
             "wear_music.db"
-        ).build()
+        )
+            .addMigrations(WearMusicDatabase.MIGRATION_1_2)
+            .build()
 
     @Provides
     @Singleton

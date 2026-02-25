@@ -73,7 +73,19 @@ class WearPlayerViewModel @Inject constructor(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), WearPlayerState())
 
-    val albumArt: StateFlow<Bitmap?> = stateRepository.albumArt
+    val albumArt: StateFlow<Bitmap?> = combine(
+        stateRepository.outputTarget,
+        stateRepository.albumArt,
+    ) { target, remoteAlbumArt ->
+        if (target == WearOutputTarget.PHONE) remoteAlbumArt else null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val paletteSeedArgb: StateFlow<Int?> = combine(
+        stateRepository.outputTarget,
+        localPlayerRepository.localPaletteSeedArgb,
+    ) { target, localSeed ->
+        if (target == WearOutputTarget.WATCH) localSeed else null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
     val isPhoneConnected: StateFlow<Boolean> = stateRepository.isPhoneConnected
     val phoneVolumeState: StateFlow<WearVolumeState> = stateRepository.volumeState
     val watchVolumeState: StateFlow<WearVolumeState> = volumeRepository.watchVolumeState

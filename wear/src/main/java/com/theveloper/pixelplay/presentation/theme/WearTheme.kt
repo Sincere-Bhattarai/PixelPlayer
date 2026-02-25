@@ -68,10 +68,15 @@ fun WearPalette.radialBackgroundBrush(): Brush = Brush.radialGradient(
 @Composable
 fun WearPixelPlayTheme(
     albumArt: Bitmap? = null,
+    seedColorArgb: Int? = null,
     content: @Composable () -> Unit,
 ) {
-    val palette = remember(albumArt) {
-        albumArt?.let(::buildPaletteFromAlbumArt) ?: DefaultWearPalette
+    val palette = remember(albumArt, seedColorArgb) {
+        when {
+            albumArt != null -> buildPaletteFromAlbumArt(albumArt)
+            seedColorArgb != null -> buildPaletteFromSeedColor(Color(seedColorArgb))
+            else -> DefaultWearPalette
+        }
     }
     val wearColors = remember(palette) {
         Colors(
@@ -96,6 +101,10 @@ fun WearPixelPlayTheme(
 
 private fun buildPaletteFromAlbumArt(bitmap: Bitmap): WearPalette {
     val seed = extractSeedColor(bitmap)
+    return buildPaletteFromSeedColor(seed)
+}
+
+private fun buildPaletteFromSeedColor(seed: Color): WearPalette {
     val seedArgb = seed.toArgb()
     val hsl = FloatArray(3)
     ColorUtils.colorToHSL(seedArgb, hsl)

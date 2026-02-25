@@ -20,5 +20,7 @@ data class WearTransferMetadata(
     val fileSize: Long,
     val bitrate: Int,
     val sampleRate: Int,
+    /** Optional seed color extracted from album art on phone, used for offline watch theming. */
+    val paletteSeedArgb: Int? = null,
     val error: String? = null,
 )
