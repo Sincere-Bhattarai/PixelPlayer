@@ -29,6 +29,7 @@ import com.theveloper.pixelplay.shared.WearTransferMetadata
 import com.theveloper.pixelplay.shared.WearTransferProgress
 import com.theveloper.pixelplay.shared.WearTransferRequest
 import com.theveloper.pixelplay.shared.WearVolumeCommand
+import com.theveloper.pixelplay.shared.WearVolumeState
 import com.theveloper.pixelplay.utils.MediaItemBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -419,6 +420,28 @@ class WearCommandReceiver : WearableListenerService() {
                     AudioManager.ADJUST_LOWER,
                     0
                 )
+                WearVolumeCommand.QUERY -> Unit
+            }
+        }
+
+        val currentLevel = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val maxLevel = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        sendVolumeState(
+            nodeId = messageEvent.sourceNodeId,
+            level = currentLevel,
+            max = maxLevel,
+        )
+    }
+
+    private fun sendVolumeState(nodeId: String, level: Int, max: Int) {
+        scope.launch {
+            runCatching {
+                val payload = json.encodeToString(WearVolumeState(level = level, max = max))
+                    .toByteArray(Charsets.UTF_8)
+                val messageClient = Wearable.getMessageClient(this@WearCommandReceiver)
+                messageClient.sendMessage(nodeId, WearDataPaths.VOLUME_STATE, payload).await()
+            }.onFailure { error ->
+                Timber.tag(TAG).w(error, "Failed to send volume state update to watch")
             }
         }
     }

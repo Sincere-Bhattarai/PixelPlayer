@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
@@ -54,6 +55,15 @@ private val DefaultWearPalette = WearPalette(
 )
 
 val LocalWearPalette = staticCompositionLocalOf { DefaultWearPalette }
+
+fun WearPalette.radialBackgroundBrush(): Brush = Brush.radialGradient(
+    colorStops = arrayOf(
+        0.0f to gradientTop,
+        0.56f to gradientMiddle,
+        0.82f to gradientBottom,
+        1.0f to Color.Black,
+    ),
+)
 
 @Composable
 fun WearPixelPlayTheme(

@@ -55,8 +55,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -86,6 +86,7 @@ import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionI
 import com.theveloper.pixelplay.presentation.components.WearTopTimeText
 import com.theveloper.pixelplay.presentation.shapes.RoundedStarShape
 import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
+import com.theveloper.pixelplay.presentation.theme.radialBackgroundBrush
 import com.theveloper.pixelplay.presentation.viewmodel.WearPlayerViewModel
 import com.theveloper.pixelplay.shared.WearPlayerState
 
@@ -135,13 +136,7 @@ private fun PlayerContent(
     onQueueClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
-    val background = Brush.radialGradient(
-        colors = listOf(
-            palette.gradientTop,
-            palette.gradientMiddle,
-            palette.gradientBottom,
-        ),
-    )
+    val background = palette.radialBackgroundBrush()
 
     val pagerState = rememberPagerState(pageCount = { 2 })
     var mainPageQueueReveal by remember { mutableFloatStateOf(0f) }
@@ -641,10 +636,11 @@ private fun SecondaryActionButton(
     contentDescription: String,
 ) {
     val palette = LocalWearPalette.current
+    val activeContainerColor = activeColor.copy(alpha = 0.84f)
     val container by animateColorAsState(
         targetValue = when {
             !enabled -> palette.controlDisabledContainer.copy(alpha = 0.42f)
-            active -> activeColor.copy(alpha = 0.36f)
+            active -> activeContainerColor
             else -> palette.chipContainer
         },
         animationSpec = spring(),
@@ -653,7 +649,7 @@ private fun SecondaryActionButton(
     val tint by animateColorAsState(
         targetValue = when {
             !enabled -> palette.controlDisabledContent
-            active -> palette.textPrimary
+            active -> if (activeContainerColor.luminance() > 0.52f) Color.Black else Color.White
             else -> palette.chipContent
         },
         animationSpec = spring(),
@@ -702,12 +698,12 @@ private fun BottomQueueShortcut(
     if (clampedProgress <= 0.01f) return
 
     val containerColor by animateColorAsState(
-        targetValue = if (enabled) palette.chipContainer else palette.controlDisabledContainer.copy(alpha = 0.5f),
+        targetValue = if (enabled) palette.controlContainer else palette.controlDisabledContainer,
         animationSpec = spring(),
         label = "queueShortcutContainer",
     )
     val iconColor by animateColorAsState(
-        targetValue = if (enabled) palette.chipContent else palette.controlDisabledContent,
+        targetValue = if (enabled) palette.controlContent else palette.controlDisabledContent,
         animationSpec = spring(),
         label = "queueShortcutIcon",
     )
@@ -723,16 +719,17 @@ private fun BottomQueueShortcut(
         colors = M3ButtonDefaults.buttonColors(
             containerColor = containerColor,
             contentColor = iconColor,
-            disabledContainerColor = containerColor,
-            disabledContentColor = iconColor,
+            disabledContainerColor = palette.controlDisabledContainer,
+            disabledContentColor = palette.controlDisabledContent,
         ),
         modifier = modifier
-            .height(edgeHeight)
+            //.height(edgeHeight)
             .graphicsLayer {
                 alpha = containerAlpha
                 scaleY = 0.55f + (0.45f * clampedProgress)
                 transformOrigin = TransformOrigin(0.5f, 1f)
-            },
+            }
+        ,
     ) {
         M3Icon(
             imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
@@ -781,7 +778,7 @@ private fun UtilityPage(
                 icon = Icons.Rounded.LibraryMusic,
                 label = "Library",
                 enabled = enabled,
-                width = sideWidth,
+                width = middleWidth,
                 onClick = onBrowseClick,
             )
 
@@ -791,7 +788,7 @@ private fun UtilityPage(
                 icon = Icons.AutoMirrored.Rounded.VolumeUp,
                 label = "Volume",
                 enabled = enabled,
-                width = middleWidth,
+                width = sideWidth,
                 onClick = onVolumeClick,
             )
         }

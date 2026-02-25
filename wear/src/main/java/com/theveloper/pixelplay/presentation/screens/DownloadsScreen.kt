@@ -16,7 +16,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,6 +31,7 @@ import com.google.android.horologist.compose.layout.rememberResponsiveColumnStat
 import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionIndicator
 import com.theveloper.pixelplay.presentation.components.WearTopTimeText
 import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
+import com.theveloper.pixelplay.presentation.theme.radialBackgroundBrush
 import com.theveloper.pixelplay.presentation.viewmodel.WearDownloadsViewModel
 
 /**
@@ -47,13 +47,7 @@ fun DownloadsScreen(
     val palette = LocalWearPalette.current
     val columnState = rememberResponsiveColumnState()
 
-    val background = Brush.radialGradient(
-        colors = listOf(
-            palette.gradientTop,
-            palette.gradientMiddle,
-            palette.gradientBottom,
-        ),
-    )
+    val background = palette.radialBackgroundBrush()
 
     Box(
         modifier = Modifier

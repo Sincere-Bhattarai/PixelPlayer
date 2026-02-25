@@ -71,6 +71,7 @@ class WearPlaybackController @Inject constructor(
     fun cycleRepeat() = sendCommand(WearPlaybackCommand(WearPlaybackCommand.CYCLE_REPEAT))
     fun volumeUp() = sendVolumeCommand(WearVolumeCommand(WearVolumeCommand.UP))
     fun volumeDown() = sendVolumeCommand(WearVolumeCommand(WearVolumeCommand.DOWN))
+    fun requestPhoneVolumeState() = sendVolumeCommand(WearVolumeCommand(WearVolumeCommand.QUERY))
 
     /** Play a song within its context queue (album, artist, playlist, etc.) */
     fun playFromContext(songId: String, contextType: String, contextId: String?) = sendCommand(
@@ -91,6 +92,7 @@ class WearPlaybackController @Inject constructor(
                 return
             }
             stateRepository.setPhoneConnected(true)
+            stateRepository.setPhoneDeviceName(nodes.firstOrNull()?.displayName.orEmpty())
 
             // Send to all connected nodes (typically just one phone)
             nodes.forEach { node ->

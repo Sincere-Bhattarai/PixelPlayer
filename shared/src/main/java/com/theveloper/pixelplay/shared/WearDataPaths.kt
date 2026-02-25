@@ -14,6 +14,9 @@ object WearDataPaths {
     /** Message path for volume commands (watch -> phone) */
     const val VOLUME_COMMAND = "/volume_command"
 
+    /** Message path for current volume state (phone -> watch) */
+    const val VOLUME_STATE = "/volume_state"
+
     /** Key for the album art Asset within a DataItem */
     const val KEY_ALBUM_ART = "album_art"
 

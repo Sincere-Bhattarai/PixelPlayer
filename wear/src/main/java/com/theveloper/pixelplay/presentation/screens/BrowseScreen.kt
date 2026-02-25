@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -35,6 +34,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionIndicator
 import com.theveloper.pixelplay.presentation.components.WearTopTimeText
 import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
+import com.theveloper.pixelplay.presentation.theme.radialBackgroundBrush
 
 /**
  * Root browse screen showing library categories.
@@ -47,13 +47,7 @@ fun BrowseScreen(
 ) {
     val columnState = rememberResponsiveColumnState()
     val palette = LocalWearPalette.current
-    val background = Brush.radialGradient(
-        colors = listOf(
-            palette.gradientTop,
-            palette.gradientMiddle,
-            palette.gradientBottom,
-        ),
-    )
+    val background = palette.radialBackgroundBrush()
 
     Box(
         modifier = Modifier

@@ -18,6 +18,7 @@ import com.theveloper.pixelplay.shared.WearPlayerState
 import com.theveloper.pixelplay.shared.WearTransferMetadata
 import com.theveloper.pixelplay.shared.WearTransferProgress
 import com.theveloper.pixelplay.shared.WearTransferRequest
+import com.theveloper.pixelplay.shared.WearVolumeState
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -229,6 +230,19 @@ class WearDataListenerService : WearableListenerService() {
                     Timber.tag(TAG).d("Received phone transfer request for songId=${request.songId}")
                 } catch (e: Exception) {
                     Timber.tag(TAG).e(e, "Failed to process transfer request")
+                }
+            }
+
+            WearDataPaths.VOLUME_STATE -> {
+                try {
+                    val volumeJson = String(messageEvent.data, Charsets.UTF_8)
+                    val volumeState = json.decodeFromString<WearVolumeState>(volumeJson)
+                    stateRepository.updateVolumeState(
+                        level = volumeState.level,
+                        max = volumeState.max,
+                    )
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to process volume state update")
                 }
             }
 

@@ -15,5 +15,6 @@ data class WearVolumeCommand(
     companion object {
         const val UP = "up"
         const val DOWN = "down"
+        const val QUERY = "query"
     }
 }

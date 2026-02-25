@@ -23,6 +23,10 @@ data class WearPlayerState(
     val isShuffleEnabled: Boolean = false,
     /** 0 = OFF, 1 = ONE, 2 = ALL */
     val repeatMode: Int = 0,
+    /** STREAM_MUSIC current volume level on phone side */
+    val volumeLevel: Int = 0,
+    /** STREAM_MUSIC max volume level on phone side */
+    val volumeMax: Int = 0,
 ) {
     val isEmpty: Boolean
         get() = songId.isEmpty()

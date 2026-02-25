@@ -1,19 +1,23 @@
 package com.theveloper.pixelplay.presentation.viewmodel
 
 import android.graphics.Bitmap
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.theveloper.pixelplay.data.WearLocalPlayerRepository
 import com.theveloper.pixelplay.data.WearOutputTarget
 import com.theveloper.pixelplay.data.WearPlaybackController
 import com.theveloper.pixelplay.data.WearStateRepository
+import com.theveloper.pixelplay.data.WearVolumeRepository
 import com.theveloper.pixelplay.shared.WearPlayerState
+import com.theveloper.pixelplay.shared.WearVolumeState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -30,6 +34,7 @@ class WearPlayerViewModel @Inject constructor(
     private val stateRepository: WearStateRepository,
     private val playbackController: WearPlaybackController,
     private val localPlayerRepository: WearLocalPlayerRepository,
+    private val volumeRepository: WearVolumeRepository,
 ) : ViewModel() {
 
     /** Whether local playback is currently active on the watch */
@@ -70,6 +75,41 @@ class WearPlayerViewModel @Inject constructor(
 
     val albumArt: StateFlow<Bitmap?> = stateRepository.albumArt
     val isPhoneConnected: StateFlow<Boolean> = stateRepository.isPhoneConnected
+    val phoneVolumeState: StateFlow<WearVolumeState> = stateRepository.volumeState
+    val watchVolumeState: StateFlow<WearVolumeState> = volumeRepository.watchVolumeState
+
+    val activeVolumeState: StateFlow<WearVolumeState> = combine(
+        isWatchOutputSelected,
+        phoneVolumeState,
+        watchVolumeState,
+    ) { isWatchOutput, phoneState, watchState ->
+        if (isWatchOutput) watchState else phoneState
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), WearVolumeState())
+
+    val activeVolumePercent: StateFlow<Int> = activeVolumeState
+        .map { state ->
+            if (state.max <= 0) 0 else ((state.level.toFloat() / state.max.toFloat()) * 100f).toInt()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val activeVolumeDeviceName: StateFlow<String> = combine(
+        isWatchOutputSelected,
+        stateRepository.phoneDeviceName,
+    ) { isWatchOutput, phoneDeviceName ->
+        if (isWatchOutput) {
+            Build.MODEL.takeIf { it.isNotBlank() } ?: "Watch"
+        } else {
+            phoneDeviceName.ifBlank { "Phone" }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Phone")
+
+    init {
+        viewModelScope.launch {
+            outputTarget.collect {
+                refreshActiveVolumeState()
+            }
+        }
+    }
 
     fun selectOutput(target: WearOutputTarget) {
         if (target == WearOutputTarget.WATCH && !localPlayerRepository.isLocalPlaybackActive.value) {
@@ -119,8 +159,31 @@ class WearPlayerViewModel @Inject constructor(
         playbackController.cycleRepeat()
     }
 
-    fun volumeUp() = playbackController.volumeUp()
-    fun volumeDown() = playbackController.volumeDown()
+    fun volumeUp() {
+        if (isWatchOutputSelected.value) {
+            volumeRepository.volumeUpOnWatch()
+        } else {
+            stateRepository.nudgePhoneVolumeLevel(delta = 1)
+            playbackController.volumeUp()
+        }
+    }
+
+    fun volumeDown() {
+        if (isWatchOutputSelected.value) {
+            volumeRepository.volumeDownOnWatch()
+        } else {
+            stateRepository.nudgePhoneVolumeLevel(delta = -1)
+            playbackController.volumeDown()
+        }
+    }
+
+    fun refreshActiveVolumeState() {
+        if (isWatchOutputSelected.value) {
+            volumeRepository.refreshWatchVolumeState()
+        } else {
+            playbackController.requestPhoneVolumeState()
+        }
+    }
 
     /** Stop local playback and switch back to remote mode */
     fun stopLocalPlayback() {

@@ -1,8 +1,10 @@
 package com.theveloper.pixelplay.data.service.wear
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioManager
 import com.google.android.gms.wearable.Asset
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
@@ -30,6 +32,9 @@ class WearStatePublisher @Inject constructor(
     private val application: Application,
 ) {
     private val dataClient by lazy { Wearable.getDataClient(application) }
+    private val audioManager by lazy {
+        application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -76,6 +81,9 @@ class WearStatePublisher @Inject constructor(
     }
 
     private suspend fun publishStateInternal(songId: String?, playerInfo: PlayerInfo) {
+        val volumeLevel = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val volumeMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+
         val wearState = WearPlayerState(
             songId = songId.orEmpty(),
             songTitle = playerInfo.songTitle,
@@ -87,6 +95,8 @@ class WearStatePublisher @Inject constructor(
             isFavorite = playerInfo.isFavorite,
             isShuffleEnabled = playerInfo.isShuffleEnabled,
             repeatMode = playerInfo.repeatMode,
+            volumeLevel = volumeLevel,
+            volumeMax = volumeMax,
         )
 
         val stateJson = json.encodeToString(wearState)

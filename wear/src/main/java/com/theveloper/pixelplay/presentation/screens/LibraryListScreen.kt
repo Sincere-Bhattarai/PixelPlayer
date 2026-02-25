@@ -14,7 +14,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,6 +33,7 @@ import com.theveloper.pixelplay.presentation.components.WearTopTimeText
 import com.theveloper.pixelplay.presentation.viewmodel.BrowseUiState
 import com.theveloper.pixelplay.presentation.viewmodel.WearBrowseViewModel
 import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
+import com.theveloper.pixelplay.presentation.theme.radialBackgroundBrush
 import com.theveloper.pixelplay.shared.WearBrowseRequest
 import com.theveloper.pixelplay.shared.WearLibraryItem
 import androidx.compose.material.icons.Icons
@@ -61,13 +61,7 @@ fun LibraryListScreen(
         viewModel.loadItems(browseType)
     }
 
-    val background = Brush.radialGradient(
-        colors = listOf(
-            palette.gradientTop,
-            palette.gradientMiddle,
-            palette.gradientBottom,
-        ),
-    )
+    val background = palette.radialBackgroundBrush()
 
     when (val state = uiState) {
         is BrowseUiState.Loading -> {
