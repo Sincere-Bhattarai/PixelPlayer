@@ -70,6 +70,7 @@ import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.data.service.auto.AutoMediaBrowseTree
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 import com.theveloper.pixelplay.utils.MediaItemBuilder
+import kotlin.math.abs
 
 import javax.inject.Inject
 
@@ -99,6 +100,10 @@ class MusicService : MediaLibraryService() {
 
     private var replayGainEnabled = false
     private var replayGainUseAlbumGain = false
+    private var replayGainJob: Job? = null
+    private var replayGainRequestToken = 0L
+    private var userSelectedVolume = 1f
+    private var expectedReplayGainVolume: Float? = null
 
     private var favoriteSongIds = emptySet<String>()
     private var mediaSession: MediaLibraryService.MediaLibrarySession? = null
@@ -144,6 +149,7 @@ class MusicService : MediaLibraryService() {
         
         // Ensure engine is ready (re-initialize if service was restarted)
         engine.initialize()
+        userSelectedVolume = engine.masterPlayer.volume.coerceIn(0f, 1f)
 
         engine.masterPlayer.addListener(playerListener)
 
@@ -528,6 +534,19 @@ class MusicService : MediaLibraryService() {
     }
 
     private val playerListener = object : Player.Listener {
+        override fun onVolumeChanged(volume: Float) {
+            if (engine.isTransitionRunning()) {
+                return
+            }
+            val expectedVolume = expectedReplayGainVolume
+            if (expectedVolume != null && abs(expectedVolume - volume) < 0.001f) {
+                expectedReplayGainVolume = null
+                return
+            }
+            expectedReplayGainVolume = null
+            userSelectedVolume = volume.coerceIn(0f, 1f)
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             val player = engine.masterPlayer
             Timber.tag(TAG).d("onIsPlayingChanged: $isPlaying. Duration: ${player.duration}, Seekable: ${player.isCurrentMediaItemSeekable}")
@@ -576,43 +595,68 @@ class MusicService : MediaLibraryService() {
      */
     private fun applyReplayGain(mediaItem: MediaItem?) {
         val player = engine.masterPlayer
-        if (!replayGainEnabled || mediaItem == null) {
-            // Reset to full volume when disabled
+        replayGainJob?.cancel()
+        replayGainRequestToken += 1
+        val requestToken = replayGainRequestToken
+
+        if (mediaItem == null) {
+            return
+        }
+
+        if (!replayGainEnabled) {
             if (!engine.isTransitionRunning()) {
-                player.volume = 1f
+                setPlayerVolume(player, userSelectedVolume)
             }
             return
         }
 
+        val mediaId = mediaItem.mediaId
         val filePath = mediaItem.mediaMetadata?.extras
             ?.getString(com.theveloper.pixelplay.utils.MediaItemBuilder.EXTERNAL_EXTRA_FILE_PATH)
 
         if (filePath.isNullOrBlank()) {
-            Timber.tag(TAG).d("ReplayGain: No file path for track, keeping volume at 1.0")
+            Timber.tag(TAG).d("ReplayGain: No file path for track, keeping user-selected volume")
             if (!engine.isTransitionRunning()) {
-                player.volume = 1f
+                setPlayerVolume(player, userSelectedVolume)
             }
             return
         }
 
+        val useAlbumGain = replayGainUseAlbumGain
         // Read ReplayGain tags on IO thread to avoid blocking main
-        serviceScope.launch {
+        replayGainJob = serviceScope.launch {
             val rgValues = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 replayGainManager.readReplayGain(filePath)
             }
 
+            if (requestToken != replayGainRequestToken) {
+                return@launch
+            }
+
+            val currentMediaId = mediaSession?.player?.currentMediaItem?.mediaId
+            if (currentMediaId != mediaId) {
+                Timber.tag(TAG).d("ReplayGain: Ignoring stale result for mediaId=%s", mediaId)
+                return@launch
+            }
+
             val volume = replayGainManager.getVolumeMultiplier(
                 rgValues,
-                useAlbumGain = replayGainUseAlbumGain
+                useAlbumGain = useAlbumGain
             )
 
             // Only apply if we're not mid-crossfade
             if (!engine.isTransitionRunning()) {
-                player.volume = volume
+                setPlayerVolume(player, volume)
                 Timber.tag(TAG).d("ReplayGain: Applied volume=%.2f for %s",
                     volume, mediaItem.mediaMetadata?.title)
             }
         }
+    }
+
+    private fun setPlayerVolume(player: Player, volume: Float) {
+        val clampedVolume = volume.coerceIn(0f, 1f)
+        expectedReplayGainVolume = clampedVolume
+        player.volume = clampedVolume
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -640,6 +684,7 @@ class MusicService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onDestroy() {
+        replayGainJob?.cancel()
         mediaSession?.run {
             release()
             mediaSession = null

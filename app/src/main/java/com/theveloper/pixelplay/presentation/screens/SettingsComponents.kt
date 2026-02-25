@@ -370,6 +370,7 @@ fun SliderSettingsItem(
         valueRange: ClosedFloatingPointRange<Float>,
         steps: Int,
         onValueChange: (Float) -> Unit,
+        onValueChangeFinished: (() -> Unit)? = null,
         valueText: (Float) -> String
 ) {
     Surface(
@@ -393,7 +394,13 @@ fun SliderSettingsItem(
                         fontWeight = FontWeight.Bold
                 )
             }
-            Slider(value = value, onValueChange = onValueChange, valueRange = valueRange, steps = steps)
+            Slider(
+                value = value,
+                onValueChange = onValueChange,
+                onValueChangeFinished = onValueChangeFinished,
+                valueRange = valueRange,
+                steps = steps
+            )
         }
     }
 }

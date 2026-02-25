@@ -653,9 +653,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setMinSongDuration(durationMs: Int) {
         viewModelScope.launch {
+            if (durationMs == _uiState.value.minSongDuration) return@launch
             userPreferencesRepository.setMinSongDuration(durationMs)
             // Trigger a library rescan so the change takes effect in the database
-            syncManager.forceRefresh()
+            syncManager.fullSync()
         }
     }
 

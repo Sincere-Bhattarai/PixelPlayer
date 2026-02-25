@@ -205,6 +205,9 @@ fun SettingsCategoryScreen(
     var showImportFlow by remember { mutableStateOf(false) }
     var exportSections by remember { mutableStateOf(BackupSection.defaultSelection) }
     var importFileUri by remember { mutableStateOf<Uri?>(null) }
+    var minSongDurationDraft by remember(uiState.minSongDuration) {
+        mutableStateOf(uiState.minSongDuration.toFloat())
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -406,10 +409,16 @@ fun SettingsCategoryScreen(
                             SettingsSubsection(title = "Filtering") {
                                 SliderSettingsItem(
                                     label = "Minimum Song Duration",
-                                    value = uiState.minSongDuration.toFloat(),
+                                    value = minSongDurationDraft,
                                     valueRange = 0f..120000f,
                                     steps = 23, // 0, 5, 10, 15, ... 120 seconds (24 positions, 23 steps)
-                                    onValueChange = { settingsViewModel.setMinSongDuration(it.toInt()) },
+                                    onValueChange = { minSongDurationDraft = it },
+                                    onValueChangeFinished = {
+                                        val selectedDuration = minSongDurationDraft.toInt()
+                                        if (selectedDuration != uiState.minSongDuration) {
+                                            settingsViewModel.setMinSongDuration(selectedDuration)
+                                        }
+                                    },
                                     valueText = { value -> "${(value / 1000).toInt()}s" }
                                 )
                             }
