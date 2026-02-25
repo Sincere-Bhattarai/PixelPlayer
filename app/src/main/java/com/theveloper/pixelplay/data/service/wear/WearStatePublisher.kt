@@ -21,11 +21,13 @@ import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * Publishes player state to the Wear Data Layer so the watch app can display it.
  *
- * Album art is sent as an Asset (compressed 100x100 JPEG) to save battery and bandwidth.
+ * Album art is sent as a bounded-size JPEG Asset for full-screen quality on watch.
  */
 @Singleton
 class WearStatePublisher @Inject constructor(
@@ -40,8 +42,9 @@ class WearStatePublisher @Inject constructor(
 
     companion object {
         private const val TAG = "WearStatePublisher"
-        private const val ART_SIZE = 100 // px, small for watch
-        private const val ART_QUALITY = 80 // JPEG quality
+        private const val ART_MAX_DIMENSION = 720 // px, slightly higher detail for full-screen watch art
+        private const val ART_QUALITY = 95 // JPEG quality
+        private const val MAX_DIRECT_ASSET_BYTES = 900_000 // keep direct transfer bounded
     }
 
     /**
@@ -119,20 +122,30 @@ class WearStatePublisher @Inject constructor(
     }
 
     /**
-     * Compress album art to a small JPEG suitable for Wear OS display.
+     * Compress album art to a JPEG suitable for full-screen watch display.
+     * Uses bounded downscale to preserve sharpness while keeping payload reasonable.
      */
     private fun createAlbumArtAsset(artBitmapData: ByteArray?): Asset? {
         if (artBitmapData == null || artBitmapData.isEmpty()) return null
 
         return try {
-            val original = BitmapFactory.decodeByteArray(artBitmapData, 0, artBitmapData.size)
-                ?: return null
-
-            // Scale down to ART_SIZE x ART_SIZE for watch display
-            val scaled = Bitmap.createScaledBitmap(original, ART_SIZE, ART_SIZE, true)
-            if (scaled !== original) {
-                original.recycle()
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(artBitmapData, 0, artBitmapData.size, bounds)
+            val srcWidth = bounds.outWidth
+            val srcHeight = bounds.outHeight
+            val srcMax = max(srcWidth, srcHeight)
+            if (
+                srcWidth > 0 &&
+                srcHeight > 0 &&
+                srcMax <= ART_MAX_DIMENSION &&
+                artBitmapData.size <= MAX_DIRECT_ASSET_BYTES
+            ) {
+                // Preserve original bytes when already suitable; avoids second lossy pass.
+                return Asset.createFromBytes(artBitmapData)
             }
+
+            val scaled = decodeBoundedBitmap(artBitmapData, ART_MAX_DIMENSION)
+                ?: return null
 
             val stream = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.JPEG, ART_QUALITY, stream)
@@ -143,5 +156,42 @@ class WearStatePublisher @Inject constructor(
             Timber.tag(TAG).w(e, "Failed to create album art asset")
             null
         }
+    }
+
+    private fun decodeBoundedBitmap(data: ByteArray, maxDimension: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+        val srcWidth = bounds.outWidth
+        val srcHeight = bounds.outHeight
+        if (srcWidth <= 0 || srcHeight <= 0) return null
+
+        var sampleSize = 1
+        while (
+            (srcWidth / sampleSize) > maxDimension * 2 ||
+            (srcHeight / sampleSize) > maxDimension * 2
+        ) {
+            sampleSize *= 2
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inJustDecodeBounds = false
+            inMutable = false
+        }
+        val decoded = BitmapFactory.decodeByteArray(data, 0, data.size, decodeOptions) ?: return null
+
+        val decodedMax = max(decoded.width, decoded.height)
+        if (decodedMax <= maxDimension) {
+            return decoded
+        }
+
+        val scale = maxDimension.toFloat() / decodedMax.toFloat()
+        val targetWidth = (decoded.width * scale).roundToInt().coerceAtLeast(1)
+        val targetHeight = (decoded.height * scale).roundToInt().coerceAtLeast(1)
+        val resized = Bitmap.createScaledBitmap(decoded, targetWidth, targetHeight, true)
+        if (resized !== decoded) {
+            decoded.recycle()
+        }
+        return resized
     }
 }

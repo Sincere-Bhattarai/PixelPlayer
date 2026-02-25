@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import android.graphics.Bitmap
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
@@ -10,6 +11,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,20 +49,29 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +93,7 @@ import androidx.wear.compose.material3.HorizontalPageIndicator as M3HorizontalPa
 import androidx.wear.compose.material3.Icon as M3Icon
 import com.google.android.horologist.compose.layout.ScalingLazyColumn
 import com.google.android.horologist.compose.layout.rememberResponsiveColumnState
+import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionIndicator
 import com.theveloper.pixelplay.presentation.components.WearTopTimeText
 import com.theveloper.pixelplay.presentation.shapes.RoundedStarShape
@@ -89,6 +101,13 @@ import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
 import com.theveloper.pixelplay.presentation.theme.radialBackgroundBrush
 import com.theveloper.pixelplay.presentation.viewmodel.WearPlayerViewModel
 import com.theveloper.pixelplay.shared.WearPlayerState
+import androidx.core.graphics.ColorUtils
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun PlayerScreen(
@@ -101,9 +120,11 @@ fun PlayerScreen(
     val state by viewModel.playerState.collectAsState()
     val isPhoneConnected by viewModel.isPhoneConnected.collectAsState()
     val isWatchOutputSelected by viewModel.isWatchOutputSelected.collectAsState()
+    val albumArt by viewModel.albumArt.collectAsState()
 
     PlayerContent(
         state = state,
+        albumArt = albumArt,
         isPhoneConnected = isPhoneConnected,
         isWatchOutputSelected = isWatchOutputSelected,
         onTogglePlayPause = viewModel::togglePlayPause,
@@ -122,6 +143,7 @@ fun PlayerScreen(
 @Composable
 private fun PlayerContent(
     state: WearPlayerState,
+    albumArt: Bitmap?,
     isPhoneConnected: Boolean,
     isWatchOutputSelected: Boolean = false,
     onTogglePlayPause: () -> Unit,
@@ -138,9 +160,10 @@ private fun PlayerContent(
     val palette = LocalWearPalette.current
     val background = palette.radialBackgroundBrush()
 
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pagerState = rememberPagerState(initialPage = 1, pageCount = { 3 })
+    val scope = rememberCoroutineScope()
     var mainPageQueueReveal by remember { mutableFloatStateOf(0f) }
-    val hidePageIndicator = pagerState.currentPage == 0 && mainPageQueueReveal > 0.05f
+    val hidePageIndicator = pagerState.currentPage == 1 && mainPageQueueReveal > 0.05f
 
     Box(
         modifier = Modifier
@@ -154,6 +177,16 @@ private fun PlayerContent(
         ) { page ->
             when (page) {
                 0 -> {
+                    AlbumArtPage(
+                        state = state,
+                        albumArt = albumArt,
+                        onTap = {
+                            scope.launch { pagerState.animateScrollToPage(1) }
+                        },
+                    )
+                }
+
+                1 -> {
                     MainPlayerPage(
                         state = state,
                         isPhoneConnected = isPhoneConnected,
@@ -193,13 +226,192 @@ private fun PlayerContent(
             )
         }
 
-        WearTopTimeText(
+        if (pagerState.currentPage != 0) {
+            WearTopTimeText(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .zIndex(5f),
+                color = palette.textPrimary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumArtPage(
+    state: WearPlayerState,
+    albumArt: Bitmap?,
+    onTap: () -> Unit,
+) {
+    val palette = LocalWearPalette.current
+    val clockTint = remember(albumArt, palette.textPrimary) {
+        deriveClockTintFromAlbumArt(albumArt, palette.textPrimary)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = onTap),
+    ) {
+        if (albumArt != null) {
+            Image(
+                bitmap = albumArt.asImageBitmap(),
+                contentDescription = "Album art",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(palette.radialBackgroundBrush()),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0f to Color.Transparent,
+                            0.78f to Color.Transparent,
+                            0.94f to Color.Black.copy(alpha = 0.52f),
+                            1f to Color.Black.copy(alpha = 0.95f),
+                        ),
+                    ),
+                ),
+        )
+
+        LargeAlbumClockText(
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .padding(top = 12.dp)
                 .zIndex(5f),
-            color = palette.textPrimary,
+            color = clockTint,
+        )
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 24.dp, vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = state.songTitle.ifEmpty { "No song playing" },
+                style = MaterialTheme.typography.title2,
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = state.artistName.ifEmpty { "Connect phone playback" },
+                style = MaterialTheme.typography.body1,
+                color = palette.textSecondary.copy(alpha = 0.94f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalTextApi::class)
+@Composable
+private fun LargeAlbumClockText(
+    modifier: Modifier = Modifier,
+    color: Color = Color.White,
+) {
+    val displayTime by produceState(initialValue = "--:--") {
+        val formatter = DateTimeFormatter.ofPattern("H:mm")
+        while (true) {
+            value = LocalTime.now().format(formatter)
+            delay(1000L)
+        }
+    }
+    val gSansFlex = remember {
+        FontFamily(
+            Font(
+                resId = R.font.gflex_variable,
+                variationSettings = FontVariation.Settings(
+                    FontVariation.weight(650),
+                    FontVariation.width(146f),
+                    FontVariation.Setting("ROND", 56f),
+                    FontVariation.Setting("XTRA", 520f),
+                    FontVariation.Setting("YOPQ", 90f),
+                    FontVariation.Setting("YTLC", 505f),
+                ),
+            ),
         )
     }
+
+    Text(
+        text = displayTime,
+        color = color,
+        fontFamily = gSansFlex,
+        fontWeight = FontWeight(760),
+        fontSize = 26.sp,
+        lineHeight = 26.sp,
+        modifier = modifier,
+    )
+}
+
+private fun deriveClockTintFromAlbumArt(albumArt: Bitmap?, fallback: Color): Color {
+    if (albumArt == null || albumArt.width <= 0 || albumArt.height <= 0) return fallback
+
+    val width = albumArt.width
+    val height = albumArt.height
+    val step = (min(width, height) / 28).coerceAtLeast(1)
+
+    var redSum = 0L
+    var greenSum = 0L
+    var blueSum = 0L
+    var count = 0L
+
+    var y = 0
+    while (y < height) {
+        var x = 0
+        while (x < width) {
+            val pixel = albumArt.getPixel(x, y)
+            val alpha = android.graphics.Color.alpha(pixel)
+            if (alpha >= 28) {
+                val r = android.graphics.Color.red(pixel)
+                val g = android.graphics.Color.green(pixel)
+                val b = android.graphics.Color.blue(pixel)
+                if (r + g + b > 30) {
+                    redSum += r
+                    greenSum += g
+                    blueSum += b
+                    count++
+                }
+            }
+            x += step
+        }
+        y += step
+    }
+
+    if (count == 0L) return fallback
+
+    val avgColor = android.graphics.Color.rgb(
+        (redSum / count).toInt(),
+        (greenSum / count).toInt(),
+        (blueSum / count).toInt(),
+    )
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(avgColor, hsl)
+    hsl[1] = max(0.42f, hsl[1]).coerceAtMost(0.92f)
+    hsl[2] = max(0.68f, hsl[2]).coerceAtMost(0.90f)
+
+    var tinted = Color(ColorUtils.HSLToColor(hsl))
+    val lum = tinted.luminance()
+    tinted = when {
+        lum < 0.60f -> androidx.compose.ui.graphics.lerp(tinted, Color.White, 0.32f)
+        lum > 0.92f -> androidx.compose.ui.graphics.lerp(tinted, Color.White, 0.08f)
+        else -> tinted
+    }
+    return tinted.copy(alpha = 0.98f)
 }
 
 @Composable
