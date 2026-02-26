@@ -1,0 +1,37 @@
+name: PixelPlay Build Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Allows you to run it manually
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Decode Keystore
+        run: echo "${{ secrets.SIGNING_KEY }}" | base64 -d > app/voidplay.jks
+
+      - name: Build & Sign APK
+        run: ./gradlew assembleRelease
+        env:
+          # These map the GitHub Secrets to system variables for Gradle
+          VOID_STORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
+          VOID_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+          VOID_ALIAS: ${{ secrets.ALIAS }}
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixelPlay-6.0.5-Alpha
+          path: app/build/outputs/apk/release/*.apk
