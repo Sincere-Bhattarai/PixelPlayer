@@ -204,6 +204,13 @@ constructor(
         // Quick Settings / Last Playlist
         val LAST_PLAYLIST_ID = stringPreferencesKey("last_playlist_id")
         val LAST_PLAYLIST_NAME = stringPreferencesKey("last_playlist_name")
+
+        // Smart Duration Filtering
+        val MIN_SONG_DURATION = intPreferencesKey("min_song_duration_ms")
+
+        // ReplayGain
+        val REPLAYGAIN_ENABLED = booleanPreferencesKey("replaygain_enabled")
+        val REPLAYGAIN_USE_ALBUM_GAIN = booleanPreferencesKey("replaygain_use_album_gain")
     }
 
     val appRebrandDialogShownFlow: Flow<Boolean> =
@@ -701,6 +708,52 @@ constructor(
             preferences[PreferencesKeys.LAST_DAILY_MIX_UPDATE] = timestamp
         }
     }
+
+    // ===== Smart Duration Filtering =====
+
+    /** Minimum song duration in milliseconds. Default 10000ms (10 seconds). */
+    val minSongDurationFlow: Flow<Int> =
+        dataStore.data.map { preferences ->
+            (preferences[PreferencesKeys.MIN_SONG_DURATION] ?: 10000).coerceIn(0, 120000)
+        }
+
+    suspend fun setMinSongDuration(durationMs: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.MIN_SONG_DURATION] = durationMs.coerceIn(0, 120000)
+        }
+    }
+
+    suspend fun getMinSongDuration(): Int {
+        return minSongDurationFlow.first()
+    }
+
+    // ===== End Smart Duration Filtering =====
+
+    // ===== ReplayGain =====
+
+    val replayGainEnabledFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_ENABLED] ?: false
+        }
+
+    val replayGainUseAlbumGainFlow: Flow<Boolean> =
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_USE_ALBUM_GAIN] ?: false
+        }
+
+    suspend fun setReplayGainEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setReplayGainUseAlbumGain(useAlbumGain: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.REPLAYGAIN_USE_ALBUM_GAIN] = useAlbumGain
+        }
+    }
+
+    // ===== End ReplayGain =====
 
     val allowedDirectoriesFlow: Flow<Set<String>> =
             dataStore.data.map { preferences ->

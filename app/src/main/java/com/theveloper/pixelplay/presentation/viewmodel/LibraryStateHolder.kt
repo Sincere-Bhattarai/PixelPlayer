@@ -45,6 +45,9 @@ class LibraryStateHolder @Inject constructor(
     private val _allSongs = MutableStateFlow<ImmutableList<Song>>(persistentListOf())
     val allSongs = _allSongs.asStateFlow()
 
+    private val _allSongsById = MutableStateFlow<Map<String, Song>>(emptyMap())
+    val allSongsById = _allSongsById.asStateFlow()
+
     private val _albums = MutableStateFlow<ImmutableList<Album>>(persistentListOf())
     val albums = _albums.asStateFlow()
 
@@ -209,9 +212,15 @@ class LibraryStateHolder @Inject constructor(
         songsJob = scope?.launch {
             _isLoadingLibrary.value = true
             musicRepository.getAudioFiles().collect { songs ->
+                // Process heavy list conversions on Default dispatcher to avoid blocking UI
+                val immutableSongs = withContext(Dispatchers.Default) { songs.toImmutableList() }
+                val songsMap = withContext(Dispatchers.Default) { songs.associateBy { it.id } }
+                
+                _allSongs.value = immutableSongs
+                _allSongsById.value = songsMap
+                
                 // When the repository emits a new list (triggered by directory changes),
                 // we update our state and re-apply current sorting.
-                _allSongs.value = songs.toImmutableList()
                 // Apply sort to the new data
                 sortSongs(_currentSongSortOption.value, persist = false)
                 _isLoadingLibrary.value = false

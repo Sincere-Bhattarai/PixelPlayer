@@ -51,7 +51,7 @@ object AudioMetadataReader {
         }
     }
 
-    fun read(file: File): AudioMetadata? {
+    fun read(file: File, readArtwork: Boolean = true): AudioMetadata? {
         return try {
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
                 // Get audio properties for duration
@@ -84,15 +84,19 @@ object AudioMetadataReader {
 
                 Log.w(TAG, "TagLib result for ${file.name}: title=$title, artist=$artist, album=$album, genre=$genre")
 
-                // Get artwork
-                val pictures = TagLib.getPictures(fd.detachFd())
-                val artwork = pictures.firstOrNull()?.let { picture ->
-                    picture.data.takeIf { it.isNotEmpty() && isValidImageData(it) }?.let { data ->
-                        AudioMetadataArtwork(
-                            bytes = data,
-                            mimeType = picture.mimeType.takeIf { it.isNotBlank() } ?: guessImageMimeType(data)
-                        )
+                // Get artwork only when requested to avoid allocating large ByteArrays unnecessarily
+                val artwork = if (readArtwork) {
+                    val pictures = TagLib.getPictures(fd.detachFd())
+                    pictures.firstOrNull()?.let { picture ->
+                        picture.data.takeIf { it.isNotEmpty() && isValidImageData(it) }?.let { data ->
+                            AudioMetadataArtwork(
+                                bytes = data,
+                                mimeType = picture.mimeType.takeIf { it.isNotBlank() } ?: guessImageMimeType(data)
+                            )
+                        }
                     }
+                } else {
+                    null
                 }
 
                 // Fallback: if TagLib couldn't read title OR artist, try JAudioTagger.

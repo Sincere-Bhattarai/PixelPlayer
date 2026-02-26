@@ -3,12 +3,14 @@ package com.theveloper.pixelplay
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ComponentCallbacks2
 import android.os.Build
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import com.theveloper.pixelplay.utils.CrashHandler
+import com.theveloper.pixelplay.utils.MediaMetadataRetrieverPool
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -23,17 +25,18 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     @Inject
     lateinit var imageLoader: dagger.Lazy<ImageLoader>
 
+    // Use dagger.Lazy to defer construction (and TDLib native library loading) off the main thread.
     @Inject
-    lateinit var telegramStreamProxy: com.theveloper.pixelplay.data.telegram.TelegramStreamProxy
+    lateinit var telegramStreamProxy: dagger.Lazy<com.theveloper.pixelplay.data.telegram.TelegramStreamProxy>
 
     @Inject
     lateinit var neteaseStreamProxy: com.theveloper.pixelplay.data.netease.NeteaseStreamProxy
-    
+
     @Inject
-    lateinit var telegramCacheManager: com.theveloper.pixelplay.data.telegram.TelegramCacheManager
-    
+    lateinit var telegramCacheManager: dagger.Lazy<com.theveloper.pixelplay.data.telegram.TelegramCacheManager>
+
     @Inject
-    lateinit var telegramCoilFetcherFactory: com.theveloper.pixelplay.data.image.TelegramCoilFetcher.Factory
+    lateinit var telegramCoilFetcherFactory: dagger.Lazy<com.theveloper.pixelplay.data.image.TelegramCoilFetcher.Factory>
 
     // AÑADE EL COMPANION OBJECT
     companion object {
@@ -66,17 +69,22 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
             notificationManager.createNotificationChannel(channel)
         }
         
-        telegramStreamProxy.start()
+        // Start Netease proxy immediately (no heavy native deps)
         neteaseStreamProxy.start()
-        
-        // Trigger robust cache cleanup on startup to remove orphaned files from previous sessions
+
+        // Start Telegram proxy and schedule cache cleanup on IO thread to avoid blocking
+        // Application.onCreate() with TDLib native library loading (System.loadLibrary("tdjni")).
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            // First .get() call constructs TelegramStreamProxy (and transitively TelegramClientManager),
+            // loading the tdjni native library here on the IO thread instead of the main thread.
+            telegramStreamProxy.get().start()
+
             try {
-                // Wait a bit for TDLib to initialize
+                // Wait a bit for TDLib to initialize before cleaning up
                 kotlinx.coroutines.delay(5000)
                 Timber.d("Performing startup Telegram cache cleanup...")
-                telegramCacheManager.clearTdLibCache()
-                telegramCacheManager.trimEmbeddedArtCache()
+                telegramCacheManager.get().clearTdLibCache()
+                telegramCacheManager.get().trimEmbeddedArtCache()
             } catch (e: Exception) {
                 Timber.e(e, "Error during startup cache cleanup")
             }
@@ -86,9 +94,16 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     override fun newImageLoader(): ImageLoader {
         return imageLoader.get().newBuilder()
             .components {
-                add(telegramCoilFetcherFactory)
+                add(telegramCoilFetcherFactory.get())
             }
             .build()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            MediaMetadataRetrieverPool.clear()
+        }
     }
 
     // 3. Sobrescribe el método para proveer la configuración de WorkManager

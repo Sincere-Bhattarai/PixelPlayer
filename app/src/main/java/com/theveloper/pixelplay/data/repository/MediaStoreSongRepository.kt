@@ -46,10 +46,10 @@ class MediaStoreSongRepository @Inject constructor(
         mediaStoreObserver.register()
     }
 
-    private fun getBaseSelection(): String {
+    private fun getBaseSelection(minDurationMs: Int = 10000): String {
         // Relaxed filter: Remove IS_MUSIC to include all audio strings (WhatsApp, Recs, etc.)
-        // We filter by duration to skip extremely short clips (likely UI sounds).
-        return "${MediaStore.Audio.Media.DURATION} >= 10000 AND ${MediaStore.Audio.Media.TITLE} != ''"
+        // We filter by duration based on user preference (default 10s).
+        return "${MediaStore.Audio.Media.DURATION} >= $minDurationMs AND ${MediaStore.Audio.Media.TITLE} != ''"
     }
 
     private suspend fun getFavoriteIds(): Set<Long> {
@@ -69,16 +69,22 @@ class MediaStoreSongRepository @Inject constructor(
         mediaStoreObserver.mediaStoreChanges.onStart { emit(Unit) },
         favoritesDao.getFavoriteSongIds(),
         userPreferencesRepository.allowedDirectoriesFlow,
-        userPreferencesRepository.blockedDirectoriesFlow
-    ) { _, favoriteIds, allowedDirs, blockedDirs ->
-        // Triggered by mediaStore change or favorites change or directory config change
-        fetchSongsFromMediaStore(favoriteIds.toSet(), allowedDirs.toList(), blockedDirs.toList())
+        userPreferencesRepository.blockedDirectoriesFlow,
+        userPreferencesRepository.minSongDurationFlow
+    ) { values ->
+        val favoriteIds = @Suppress("UNCHECKED_CAST") (values[1] as List<Long>)
+        val allowedDirs = @Suppress("UNCHECKED_CAST") (values[2] as Set<String>)
+        val blockedDirs = @Suppress("UNCHECKED_CAST") (values[3] as Set<String>)
+        val minDuration = values[4] as Int
+        // Triggered by mediaStore change or favorites change or directory/duration config change
+        fetchSongsFromMediaStore(favoriteIds.toSet(), allowedDirs.toList(), blockedDirs.toList(), minDuration)
     }.flowOn(Dispatchers.IO)
 
     private suspend fun fetchSongsFromMediaStore(
         favoriteIds: Set<Long>,
         allowedDirs: List<String>,
-        blockedDirs: List<String>
+        blockedDirs: List<String>,
+        minDurationMs: Int = 10000
     ): List<Song> = withContext(Dispatchers.IO) {
         val songs = mutableListOf<Song>()
         val projection = arrayOf(
@@ -103,7 +109,7 @@ class MediaStoreSongRepository @Inject constructor(
         // Handling API version differences for columns if necessary
         // Assuming minSdk is high enough or columns exist (ALBUM_ARTIST is API 30+, need check if app supports lower)
 
-        val selection = getBaseSelection()
+        val selection = getBaseSelection(minDurationMs)
 
         val songIdToGenreMap = getSongIdToGenreMap(context.contentResolver)
 
@@ -265,12 +271,17 @@ class MediaStoreSongRepository @Inject constructor(
         return combine(
             mediaStoreObserver.mediaStoreChanges.onStart { emit(Unit) },
             userPreferencesRepository.allowedDirectoriesFlow,
-            userPreferencesRepository.blockedDirectoriesFlow
-        ) { _, allowedDirs, blockedDirs ->
-            Triple(allowedDirs, blockedDirs, Unit)
-        }.flatMapLatest { (allowedDirs, blockedDirs, _) ->
-            val musicIds = getFilteredSongIds(allowedDirs.toList(), blockedDirs.toList())
-            val genreMap = getSongIdToGenreMap(context.contentResolver) // Potentially expensive, optimize if needed
+            userPreferencesRepository.blockedDirectoriesFlow,
+            userPreferencesRepository.minSongDurationFlow
+        ) { values ->
+            val allowedDirs = @Suppress("UNCHECKED_CAST") (values[1] as Set<String>)
+            val blockedDirs = @Suppress("UNCHECKED_CAST") (values[2] as Set<String>)
+            val minDuration = values[3] as Int
+            Triple(allowedDirs, blockedDirs, minDuration)
+        }.flatMapLatest { (allowedDirs, blockedDirs, minDuration) ->
+            val minDurationMs = minDuration as Int
+            val musicIds = getFilteredSongIds(allowedDirs.toList(), blockedDirs.toList(), minDurationMs)
+            val genreMap = getSongIdToGenreMap(context.contentResolver)
 
             androidx.paging.Pager(
                 config = androidx.paging.PagingConfig(
@@ -285,10 +296,10 @@ class MediaStoreSongRepository @Inject constructor(
         }.flowOn(Dispatchers.IO)
     }
 
-    private suspend fun getFilteredSongIds(allowedDirs: List<String>, blockedDirs: List<String>): List<Long> = withContext(Dispatchers.IO) {
+    private suspend fun getFilteredSongIds(allowedDirs: List<String>, blockedDirs: List<String>, minDurationMs: Int = 10000): List<Long> = withContext(Dispatchers.IO) {
         val ids = mutableListOf<Long>()
         val projection = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.DATA)
-        val selection = getBaseSelection()
+        val selection = getBaseSelection(minDurationMs)
 
         try {
             context.contentResolver.query(

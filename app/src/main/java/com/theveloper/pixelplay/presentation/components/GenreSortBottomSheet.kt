@@ -34,7 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.theveloper.pixelplay.presentation.screens.SortOption
+import com.theveloper.pixelplay.presentation.viewmodel.SortOption
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 
 @OptIn(ExperimentalMaterial3Api::class)

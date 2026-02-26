@@ -1823,7 +1823,7 @@ class PlayerViewModel @Inject constructor(
     ): Song? {
         val resolvedSong =
             allSongsById?.get(mediaItem.mediaId)
-                ?: libraryStateHolder.allSongs.value.find { it.id == mediaItem.mediaId }
+                ?: libraryStateHolder.allSongsById.value[mediaItem.mediaId]
                 ?: _playerUiState.value.currentPlaybackQueue.find { it.id == mediaItem.mediaId }
                 ?: mediaMapper.resolveSongFromMediaItem(mediaItem)
 
@@ -1854,17 +1854,27 @@ class PlayerViewModel @Inject constructor(
             return
         }
 
-        val queue = mutableListOf<Song>()
-        val allSongsById = libraryStateHolder.allSongs.value.associateBy(Song::id)
-
+        // To avoid ANRs with very large queues (e.g. 5000+ songs after a long background stay),
+        // we capture the lightweight MediaItem references on the Main thread, but process 
+        // the heavy resolving and Song object creation on a background thread.
+        val mediaItems = mutableListOf<MediaItem>()
         for (i in 0 until count) {
-            val mediaItem = currentMediaController.getMediaItemAt(i)
-            resolveSongFromMediaItem(mediaItem, allSongsById)?.let { queue.add(it) }
+            mediaItems.add(currentMediaController.getMediaItemAt(i))
         }
 
-        _playerUiState.update { it.copy(currentPlaybackQueue = queue.toImmutableList()) }
-        if (queue.isNotEmpty()) {
-            _isSheetVisible.value = true
+        viewModelScope.launch {
+            val allSongsById = libraryStateHolder.allSongsById.value
+            
+            val queue = withContext(Dispatchers.Default) {
+                mediaItems.mapNotNull { mediaItem ->
+                    resolveSongFromMediaItem(mediaItem, allSongsById)
+                }
+            }
+
+            _playerUiState.update { it.copy(currentPlaybackQueue = queue.toImmutableList()) }
+            if (queue.isNotEmpty()) {
+                _isSheetVisible.value = true
+            }
         }
     }
 

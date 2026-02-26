@@ -7,6 +7,7 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -16,7 +17,8 @@ class WidgetUpdateReceiver : BroadcastReceiver() {
         if (intent.action != "com.example.pixelplay.ACTION_WIDGET_UPDATE_PLAYBACK_STATE") return
 
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+        val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        scope.launch {
             try {
                 val glanceAppWidgetManager = GlanceAppWidgetManager(context)
 
@@ -43,6 +45,7 @@ class WidgetUpdateReceiver : BroadcastReceiver() {
                 Timber.tag("WidgetUpdateReceiver").e(e, "Error updating widgets")
             } finally {
                 pendingResult.finish()
+                scope.cancel()
             }
         }
     }

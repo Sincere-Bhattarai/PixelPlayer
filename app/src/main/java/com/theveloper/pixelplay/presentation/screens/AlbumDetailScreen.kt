@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextGeometricTransform
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
@@ -92,6 +93,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.AlbumDetailViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import com.theveloper.pixelplay.utils.shapes.RoundedStarShape
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -111,6 +113,14 @@ fun AlbumDetailScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
+    
+    // Optimization: Defer list processing until transition is finished
+    var isTransitionFinished by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(600)
+        isTransitionFinished = true
+    }
+
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -168,6 +178,12 @@ fun AlbumDetailScreen(
                 val album = uiState.album!!
                 val songs = uiState.songs
                 val lazyListState = rememberLazyListState()
+                var isTransitionFinished by remember { mutableStateOf(false) }
+
+                LaunchedEffect(Unit) {
+                    delay(600) // Ensure transition is finished
+                    isTransitionFinished = true
+                }
 
                 val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
                 val minTopBarHeight = 64.dp + statusBarHeight
@@ -177,14 +193,13 @@ fun AlbumDetailScreen(
                 val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }
 
                 val topBarHeight = remember { Animatable(maxTopBarHeightPx) }
-                var collapseFraction by remember { mutableFloatStateOf(0f) }
-
-                LaunchedEffect(topBarHeight.value) {
-                    collapseFraction =
+                val collapseFraction by remember(minTopBarHeightPx, maxTopBarHeightPx) {
+                    derivedStateOf {
                         1f - ((topBarHeight.value - minTopBarHeightPx) / (maxTopBarHeightPx - minTopBarHeightPx)).coerceIn(
                             0f,
                             1f
                         )
+                    }
                 }
 
                 val nestedScrollConnection = remember {
@@ -259,17 +274,18 @@ fun AlbumDetailScreen(
                     val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
                     LazyColumn(
                         state = lazyListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset { IntOffset(0, topBarHeight.value.toInt()) },
                         contentPadding = PaddingValues(
-                            top = currentTopBarHeightDp,
                             start = 16.dp,
                             end = if ((lazyListState.canScrollForward || lazyListState.canScrollBackward) && collapseFraction > 0.95f) 24.dp else 16.dp,
                             bottom = fabBottomPadding + 80.dp // To account for FAB
                         ),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxSize()
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(songs, key = { song -> "album_song_${song.id}" }) { song ->
+                        val displayedSongs = if (isTransitionFinished) songs else songs.take(20)
+                        items(displayedSongs, key = { song -> "album_song_${song.id}" }) { song ->
                             EnhancedSongListItem(
                                 song = song,
                                 isCurrentSong = stablePlayerState.currentSong?.id == song.id,

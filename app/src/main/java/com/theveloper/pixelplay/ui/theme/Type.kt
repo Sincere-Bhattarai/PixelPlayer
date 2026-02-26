@@ -1,10 +1,11 @@
 package com.theveloper.pixelplay.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.googlefonts.Font
 import androidx.compose.ui.text.googlefonts.GoogleFont
@@ -61,10 +62,51 @@ val ExpTitleTypography = Typography(
     )
 )
 
-// Define tu FontFamily personalizada aquí
+// Google Sans Flex variable font with rounded axis for Google Sans Rounded-like appearance.
+private const val GoogleSansFlexRond = 100f
+
+@OptIn(ExperimentalTextApi::class)
 val GoogleSansRounded = FontFamily(
-    Font(R.font.google_sans_rounded_regular, FontWeight.Normal)
-    // Agrega otras variantes (light, medium, italic) si las tienes
+    androidx.compose.ui.text.font.Font(
+        resId = R.font.gflex_variable,
+        weight = FontWeight.Light,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(FontWeight.Light.weight),
+            FontVariation.Setting("ROND", GoogleSansFlexRond)
+        )
+    ),
+    androidx.compose.ui.text.font.Font(
+        resId = R.font.gflex_variable,
+        weight = FontWeight.Normal,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(FontWeight.Normal.weight),
+            FontVariation.Setting("ROND", GoogleSansFlexRond)
+        )
+    ),
+    androidx.compose.ui.text.font.Font(
+        resId = R.font.gflex_variable,
+        weight = FontWeight.Medium,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(FontWeight.Medium.weight),
+            FontVariation.Setting("ROND", GoogleSansFlexRond)
+        )
+    ),
+    androidx.compose.ui.text.font.Font(
+        resId = R.font.gflex_variable,
+        weight = FontWeight.SemiBold,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(FontWeight.SemiBold.weight),
+            FontVariation.Setting("ROND", GoogleSansFlexRond)
+        )
+    ),
+    androidx.compose.ui.text.font.Font(
+        resId = R.font.gflex_variable,
+        weight = FontWeight.Bold,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(FontWeight.Bold.weight),
+            FontVariation.Setting("ROND", GoogleSansFlexRond)
+        )
+    ),
 )
 
 // Tipografía - Usar fuentes amigables y modernas.

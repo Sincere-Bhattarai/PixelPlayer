@@ -6,8 +6,8 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import com.theveloper.pixelplay.data.database.MusicDao
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileInputStream
@@ -190,8 +190,8 @@ object AlbumArtUtils {
             outputStream.write(bytes)
         }
         
-        // Trigger async cache cleanup if needed
-        CoroutineScope(Dispatchers.IO).launch {
+        // Trigger async cache cleanup if needed (GlobalScope: intentional fire-and-forget app-level task)
+        GlobalScope.launch(Dispatchers.IO) {
             AlbumArtCacheManager.cleanCacheIfNeeded(appContext)
         }
 

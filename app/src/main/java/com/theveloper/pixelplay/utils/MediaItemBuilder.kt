@@ -21,6 +21,7 @@ object MediaItemBuilder {
     const val EXTERNAL_EXTRA_MIME_TYPE = EXTERNAL_EXTRA_PREFIX + "MIME_TYPE"
     const val EXTERNAL_EXTRA_BITRATE = EXTERNAL_EXTRA_PREFIX + "BITRATE"
     const val EXTERNAL_EXTRA_SAMPLE_RATE = EXTERNAL_EXTRA_PREFIX + "SAMPLE_RATE"
+    const val EXTERNAL_EXTRA_FILE_PATH = EXTERNAL_EXTRA_PREFIX + "FILE_PATH"
 
     fun build(song: Song): MediaItem {
         return MediaItem.Builder()
@@ -53,6 +54,7 @@ object MediaItemBuilder {
             putString(EXTERNAL_EXTRA_MIME_TYPE, song.mimeType)
             putInt(EXTERNAL_EXTRA_BITRATE, song.bitrate ?: 0)
             putInt(EXTERNAL_EXTRA_SAMPLE_RATE, song.sampleRate ?: 0)
+            putString(EXTERNAL_EXTRA_FILE_PATH, song.path)
         }
 
         metadataBuilder.setExtras(extras)

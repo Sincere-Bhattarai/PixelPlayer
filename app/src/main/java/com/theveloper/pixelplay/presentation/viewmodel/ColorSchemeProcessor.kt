@@ -54,8 +54,10 @@ class ColorSchemeProcessor @Inject constructor(
     /**
      * Channel for queuing color scheme requests.
      * Used by PlayerViewModel for background processing.
+     * Capacity is bounded with DROP_OLDEST to prevent unbounded growth during rapid
+     * track changes (e.g. fast seek through a large playlist).
      */
-    val requestChannel = Channel<String>(Channel.UNLIMITED)
+    val requestChannel = Channel<String>(capacity = 32, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
 
     /**
      * Gets or generates a color scheme for the given album art URI.
@@ -128,6 +130,8 @@ class ColorSchemeProcessor @Inject constructor(
             // Extract colors on Default dispatcher (CPU-bound)
             val schemePair = withContext(Dispatchers.Default) {
                 val seed = extractSeedColor(bitmap)
+                // Recycle immediately after pixel access — we only need the seed color.
+                bitmap.recycle()
                 generateColorSchemeFromSeed(
                     seedColor = seed,
                     paletteStyle = paletteStyle
@@ -182,6 +186,8 @@ class ColorSchemeProcessor @Inject constructor(
                     drawable.setBounds(0, 0, canvas.width, canvas.height)
                     drawable.draw(canvas)
                 }
+                // bitmap is only needed for extractSeedColor() which is called synchronously
+                // by the caller on Dispatchers.Default; it will be recycled there.
             }
         } catch (e: Exception) {
             null

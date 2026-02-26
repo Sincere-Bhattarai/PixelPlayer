@@ -40,6 +40,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Velocity
@@ -60,8 +61,11 @@ import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.components.SongInfoBottomSheet
 import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
 import com.theveloper.pixelplay.presentation.screens.QuickFillDialog
+import com.theveloper.pixelplay.presentation.viewmodel.GenreDetailListItem
 import com.theveloper.pixelplay.presentation.viewmodel.GenreDetailViewModel
-import com.theveloper.pixelplay.presentation.viewmodel.GroupedSongListItem
+import com.theveloper.pixelplay.presentation.viewmodel.SortOption
+import com.theveloper.pixelplay.presentation.viewmodel.SectionData
+import com.theveloper.pixelplay.presentation.viewmodel.AlbumData
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme
@@ -73,35 +77,6 @@ import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import kotlin.math.roundToInt
 
 // --- Data Models & Helpers ---
-
-enum class SortOption { ARTIST, ALBUM, TITLE }
-
-sealed class SectionData {
-    abstract val id: String
-
-    data class ArtistSection(
-        override val id: String,
-        val artistName: String,
-        val albums: List<AlbumData>
-    ) : SectionData()
-
-    data class AlbumSection(
-        override val id: String,
-        val album: AlbumData
-    ) : SectionData()
-
-    data class FlatList(
-        val songs: List<Song>
-    ) : SectionData() {
-        override val id = "flat_list"
-    }
-}
-
-data class AlbumData(
-    val name: String,
-    val artUri: String?,
-    val songs: List<Song>
-)
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -120,13 +95,19 @@ fun GenreDetailScreen(
     val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
     val libraryGenres by playerViewModel.genres.collectAsStateWithLifecycle()
     
-    // Get artists to resolve images
-    val artists by playerViewModel.artistsFlow.collectAsStateWithLifecycle(initialValue = persistentListOf())
+    // Track transition state to defer heavy list rendering
+    var isTransitionFinished by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        // We wait slightly longer than the navigation transition duration (500ms)
+        // to ensure the heavy list content only populates after the screen is fully static.
+        // Increased delay slightly to ensure absolute smoothness before full list populates.
+        kotlinx.coroutines.delay(800) 
+        isTransitionFinished = true
+    }
 
+    val density = LocalDensity.current
     val darkMode = LocalPixelPlayDarkTheme.current
 
-    // Scroll & Collapsing Top Bar State
-    val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 
@@ -137,10 +118,10 @@ fun GenreDetailScreen(
     val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }
 
     val topBarHeight = remember { Animatable(maxTopBarHeightPx) }
-    var collapseFraction by remember { mutableStateOf(0f) }
-
-    LaunchedEffect(topBarHeight.value) {
-        collapseFraction = 1f - ((topBarHeight.value - minTopBarHeightPx) / (maxTopBarHeightPx - minTopBarHeightPx)).coerceIn(0f, 1f)
+    val collapseFraction by remember(minTopBarHeightPx, maxTopBarHeightPx) {
+        derivedStateOf {
+            1f - ((topBarHeight.value - minTopBarHeightPx) / (maxTopBarHeightPx - minTopBarHeightPx)).coerceIn(0f, 1f)
+        }
     }
 
     val nestedScrollConnection = remember {
@@ -195,9 +176,7 @@ fun GenreDetailScreen(
     // Colors
     val defaultContainer = MaterialTheme.colorScheme.surfaceVariant
     val defaultOnContainer = MaterialTheme.colorScheme.onSurfaceVariant
-    val themeGenre = remember(libraryGenres, decodedGenreId) {
-        libraryGenres.firstOrNull { it.id.equals(decodedGenreId, ignoreCase = true) }
-    }
+    val themeGenre = uiState.genre
     val themeColor = remember(themeGenre, decodedGenreId, darkMode, defaultContainer, defaultOnContainer) {
         if (themeGenre != null) {
             com.theveloper.pixelplay.ui.theme.GenreThemeUtils.getGenreThemeColor(
@@ -215,12 +194,22 @@ fun GenreDetailScreen(
     
     val startColor = themeColor.container
     val contentColor = themeColor.onContainer
-    val genreDisplayName = themeGenre?.name ?: uiState.genre?.name ?: "Genre"
+    
+    // Optimization: Calculate a fast display name for the title while the full Genre object is loading.
+    // This prevents the "Genre" placeholder from flashing during the navigation transition.
+    val initialDisplayName = remember(decodedGenreId) {
+        decodedGenreId
+            .replace("_", " ")
+            .split(" ")
+            .joinToString(" ") { word ->
+                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            }
+    }
+    val genreDisplayName = themeGenre?.name ?: uiState.genre?.name ?: initialDisplayName
     val genreShuffleLabel = "$genreDisplayName Shuffle"
     
     // FAB Logic
     var showSortSheet by remember { mutableStateOf(false) }
-    var sortOption by remember { mutableStateOf(SortOption.ARTIST) }
     var showSongOptionsSheet by remember { mutableStateOf<Song?>(null) }
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     var showQuickFillDialog by remember { mutableStateOf(false) }
@@ -233,27 +222,9 @@ fun GenreDetailScreen(
     val customGenreIcons by playerViewModel.customGenreIcons.collectAsStateWithLifecycle()
     val isMiniPlayerVisible = stablePlayerState.currentSong != null
     val fabBottomPadding by animateDpAsState(
-        targetValue = if (isMiniPlayerVisible) MiniPlayerHeight + 16.dp else 16.dp, 
+        targetValue = if (isMiniPlayerVisible) MiniPlayerHeight + 16.dp else 16.dp,
         label = "fabPadding"
     )
-
-    val sortedSongs = remember(uiState.songs, sortOption) {
-        when (sortOption) {
-            SortOption.ARTIST -> uiState.songs.sortedBy { it.artist }
-            SortOption.ALBUM -> uiState.songs.sortedBy { it.album }
-            SortOption.TITLE -> uiState.songs.sortedBy { it.title }
-        }
-    }
-    
-    val displaySections = remember(sortedSongs, sortOption) {
-        if (sortOption == SortOption.ARTIST) {
-            buildSectionsByArtist(sortedSongs)
-        } else if (sortOption == SortOption.ALBUM) {
-             buildSectionsByAlbum(sortedSongs)
-        } else {
-            listOf(SectionData.FlatList(sortedSongs))
-        }
-    }
 
     // Dynamic Theme
     val genreColorScheme = remember(themeGenre, decodedGenreId, darkMode) {
@@ -274,67 +245,89 @@ fun GenreDetailScreen(
                 .nestedScroll(nestedScrollConnection)
                 .background(MaterialTheme.colorScheme.background) // Uses new theme background
         ) {
+            // Optimization: Cache Dp conversions
             val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
-            // Content
+            // Optimization: Use fixed padding and offset instead of dynamic contentPadding 
+            // to avoid triggered remeasures of the entire list on every pixel of scroll.
+            
             LazyColumn(
                 state = lazyListState,
                 contentPadding = PaddingValues(
-                    top = currentTopBarHeightDp + 8.dp, // Push content down initially
+                    top = minTopBarHeight + 8.dp, // FIXED padding
                     start = 8.dp,
-                    // Only add end padding if scrollbar is visible (collapsed header)
-                    end = if ((lazyListState.canScrollForward || lazyListState.canScrollBackward) && collapseFraction > 0.95f) 20.dp else 8.dp,
+                    end = 8.dp, // Stabilize padding to avoid remeasure during transition
                     bottom = fabBottomPadding + 148.dp
                 ),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset {
+                        // Offset the entire list down by the current "expansion" of the top bar
+                        val extraHeight = (topBarHeight.value - minTopBarHeightPx).roundToInt()
+                        IntOffset(0, extraHeight)
+                    }
             ) {
-                displaySections.forEach { section ->
-                    when (section) {
-                        is SectionData.ArtistSection -> {
-                            ArtistSection(
-                                section = section,
-                                artists = artists,
-                                onSongClick = { song ->
-                                    playerViewModel.showAndPlaySong(song, sortedSongs, genreDisplayName)
-                                },
-                                stablePlayerState = stablePlayerState,
-                                onMoreOptionsClick = { song -> showSongOptionsSheet = song }
-                            )
+                // Optimization: Limit rendered items during the navigation transition 
+                // to ensure the slide-in animation remains smooth.
+                val displayItems = if (isTransitionFinished || uiState.flattenedItems.size < 20) {
+                    uiState.flattenedItems
+                } else {
+                    uiState.flattenedItems.take(20)
+                }
+
+                items(
+                    items = displayItems,
+                    key = { it.key },
+                    contentType = { it::class } // CRITICAL: Content type for optimized recycling
+                ) { item ->
+                    when (item) {
+                        is GenreDetailListItem.ArtistHeader -> {
+                            GenreArtistHeader(item.artistName, item.artistImageUrl)
                         }
-                        is SectionData.AlbumSection -> {
-                            AlbumSection(
-                                section = section,
+                        is GenreDetailListItem.AlbumHeader -> {
+                            GenreAlbumHeader(
+                                album = item.album,
+                                useArtistStyle = item.useArtistStyle,
                                 onSongClick = { song ->
-                                    playerViewModel.showAndPlaySong(song, sortedSongs, genreDisplayName)
-                                },
-                                stablePlayerState = stablePlayerState,
-                                onMoreOptionsClick = { song -> showSongOptionsSheet = song }
-                            )
-                        }
-                        is SectionData.FlatList -> {
-                            // Add vertical spacing before flat list if needed, or handle within
-                            // For FlatList, we can just use items directly but simpler to keep consistency
-                            items(
-                                items = section.songs,
-                                key = { it.id }
-                            ) { song ->
-                                Box(modifier = Modifier.animateItem()) {
-                                    EnhancedSongListItem(
-                                        song = song,
-                                        isPlaying = stablePlayerState.isPlaying,
-                                        isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                                        onClick = {
-                                            playerViewModel.showAndPlaySong(song, sortedSongs, genreDisplayName)
-                                        },
-                                        onMoreOptionsClick = { showSongOptionsSheet = it }
-                                    )
+                                    playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
                                 }
-                                Spacer(Modifier.height(4.dp))
+                            )
+                        }
+                        is GenreDetailListItem.SongItem -> {
+                            // Use key to avoid unnecessary recomposition of this stable wrapper
+                            key(item.key) {
+                                GenreSongItemWrapper(
+                                    item = item,
+                                    stablePlayerState = stablePlayerState,
+                                    onSongClick = { song ->
+                                        playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
+                                    },
+                                    onMoreOptionsClick = { song -> showSongOptionsSheet = song }
+                                )
+                            }
+                        }
+                        is GenreDetailListItem.Spacer -> {
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(item.heightDp.dp)
+                                    .run {
+                                        if (item.useSurfaceBackground) background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+                                        else this
+                                    }
+                            )
+                        }
+                        is GenreDetailListItem.Divider -> {
+                             Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                HorizontalDivider(modifier = Modifier.alpha(0.3f))
                             }
                         }
                     }
-                    // Add spacing between sections
-                    item { Spacer(Modifier.height(16.dp)) }
                 }
             }
 
@@ -345,8 +338,8 @@ fun GenreDetailScreen(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
                         .padding(
-                            top = currentTopBarHeightDp + 12.dp, // Added 12.dp as requested
-                            bottom = fabBottomPadding + 112.dp // Increased by 40dp as requested (72 + 40 = 112)
+                            top = minTopBarHeight + 12.dp, // Stable padding for performance
+                            bottom = fabBottomPadding + 112.dp // Stable padding
                         )
                 )
             }
@@ -389,14 +382,14 @@ fun GenreDetailScreen(
             if (showSortSheet) {
                 GenreSortBottomSheet(
                     onDismiss = { showSortSheet = false },
-                    currentSort = sortOption,
+                    currentSort = uiState.sortOption,
                     onSortSelected = {
-                        sortOption = it
+                        viewModel.updateSortOption(it)
                         showSortSheet = false
                     },
                     onShuffle = {
                         if (uiState.songs.isNotEmpty()) {
-                            playerViewModel.showAndPlaySong(uiState.songs.random(), uiState.songs, genreShuffleLabel)
+                            playerViewModel.showAndPlaySong(uiState.sortedSongs.random(), uiState.sortedSongs, genreShuffleLabel)
                             showSortSheet = false
                         }
                     },
@@ -463,7 +456,7 @@ fun GenreDetailScreen(
                         },
                         onDismiss = { showSongOptionsSheet = null },
                         onPlaySong = {
-                            playerViewModel.showAndPlaySong(song, sortedSongs, genreDisplayName)
+                            playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
                             showSongOptionsSheet = null
                         },
                         onAddToQueue = {
@@ -533,13 +526,25 @@ fun GenreCollapsibleTopBar(
     contentColor: Color,
     collapsedContentColor: Color
 ) {
-    LocalDensity.current
     val solidAlpha = (collapseFraction * 2f).coerceIn(0f, 1f)
     val animatedContentColor = androidx.compose.ui.graphics.lerp(
         start = contentColor,
         stop = collapsedContentColor,
         fraction = solidAlpha
     )
+
+    // Optimization: Pre-calculate alpha values
+    val gradientAlpha = 0.8f * (1f - solidAlpha)
+    
+    // Optimization: Reuse gradient brush to avoid allocation on every pixel scroll
+    val verticalGradient = remember(startColor, gradientAlpha) {
+        Brush.verticalGradient(
+            colors = listOf(
+                startColor.copy(alpha = gradientAlpha),
+                startColor.copy(alpha = 0f)
+            )
+        )
+    }
 
     Box(
         modifier = Modifier
@@ -555,14 +560,7 @@ fun GenreCollapsibleTopBar(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            startColor.copy(alpha = 0.8f * (1f - solidAlpha)),
-                            startColor.copy(alpha = 0f)
-                        )
-                    )
-                )
+                .background(verticalGradient)
         )
 
         Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
@@ -594,157 +592,96 @@ fun GenreCollapsibleTopBar(
 }
 
 
-private fun buildSectionsByArtist(songs: List<Song>): List<SectionData> {
-    val grouped = songs.groupBy { it.artist ?: "Unknown Artist" }
-    return grouped.map { (artist, artistSongs) ->
-        val albums = artistSongs.groupBy { it.album ?: "Unknown Album" }.map { (albumName, albumSongs) ->
-             AlbumData(albumName, albumSongs.firstOrNull()?.albumArtUriString, albumSongs)
-        }
-        SectionData.ArtistSection("artist_$artist", artist, albums)
-    }
-}
-
-private fun buildSectionsByAlbum(songs: List<Song>): List<SectionData> {
-     val grouped = songs.groupBy { it.album ?: "Unknown Album" }
-     return grouped.map { (album, albumSongs) ->
-         SectionData.AlbumSection(
-             "album_$album",
-             AlbumData(album, albumSongs.firstOrNull()?.albumArtUriString, albumSongs)
-         )
-     }
-}
-
 // --- Section Extensions ---
 
-fun LazyListScope.ArtistSection(
-    section: SectionData.ArtistSection,
-    artists: List<Artist>,
-    onSongClick: (Song) -> Unit,
-    stablePlayerState: StablePlayerState,
-    onMoreOptionsClick: (Song) -> Unit
+// --- Item Composables for Flattened List ---
+
+@Composable
+fun GenreArtistHeader(
+    artistName: String,
+    artistImageUrl: String?
 ) {
-    val artistImage = artists.find { it.name.equals(section.artistName, ignoreCase = true) }?.imageUrl
-
-    // 1. Artist Header
-    item(key = "header_${section.id}") {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 24.dp, smoothnessAsPercentTR = 60,
-                cornerRadiusTL = 24.dp, smoothnessAsPercentTL = 60,
-                cornerRadiusBR = 0.dp, smoothnessAsPercentBR = 0,
-                cornerRadiusBL = 0.dp, smoothnessAsPercentBL = 0
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            // Header Content
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!artistImage.isNullOrEmpty()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(artistImage)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = section.artistName,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Rounded.Person,
-                                contentDescription = "Generic Artist",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier
-                                    .padding(10.dp)
-                                    .fillMaxSize()
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = section.artistName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
-        }
-    }
-
-    // 2. Albums Loop
-    section.albums.forEachIndexed { albumIndex, album ->
-        if (albumIndex > 0) {
-            item(key = "divider_${section.id}_$albumIndex") {
-                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    HorizontalDivider(modifier = Modifier.alpha(0.3f))
-                }
-            }
-        }
-
-        AlbumSectionItems(
-            album = album,
-            keyPrefix = section.id, // Pass section ID (includes artist name)
-            onSongClick = onSongClick,
-            stablePlayerState = stablePlayerState,
-            onMoreOptionsClick = onMoreOptionsClick,
-            isLastAlbumInSection = albumIndex == section.albums.lastIndex,
-            useArtistStyle = true
+    val headerShape = remember {
+        AbsoluteSmoothCornerShape(
+            cornerRadiusTR = 24.dp, smoothnessAsPercentTR = 60,
+            cornerRadiusTL = 24.dp, smoothnessAsPercentTL = 60,
+            cornerRadiusBR = 0.dp, smoothnessAsPercentBR = 0,
+            cornerRadiusBL = 0.dp, smoothnessAsPercentBL = 0
         )
     }
+
+    val context = LocalContext.current
+    val imageRequest = remember(artistImageUrl) {
+        if (!artistImageUrl.isNullOrEmpty()) {
+            ImageRequest.Builder(context)
+                .data(artistImageUrl)
+                .crossfade(true)
+                .build()
+        } else null
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+        shape = headerShape,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (imageRequest != null) {
+                        AsyncImage(
+                            model = imageRequest,
+                            contentDescription = artistName,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Person,
+                            contentDescription = "Generic Artist",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .fillMaxSize()
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = artistName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
 }
 
-fun LazyListScope.AlbumSection(
-    section: SectionData.AlbumSection,
-    onSongClick: (Song) -> Unit,
-    stablePlayerState: StablePlayerState,
-    onMoreOptionsClick: (Song) -> Unit
-) {
-    AlbumSectionItems(
-        album = section.album,
-        keyPrefix = section.id, // Pass section ID (unique for album view)
-        onSongClick = onSongClick,
-        stablePlayerState = stablePlayerState,
-        onMoreOptionsClick = onMoreOptionsClick,
-        isLastAlbumInSection = true,
-        useArtistStyle = false
-    )
-}
-
-fun LazyListScope.AlbumSectionItems(
+@Composable
+fun GenreAlbumHeader(
     album: AlbumData,
-    keyPrefix: String, // Added prefix for uniqueness
-    onSongClick: (Song) -> Unit,
-    stablePlayerState: StablePlayerState,
-    onMoreOptionsClick: (Song) -> Unit,
-    isLastAlbumInSection: Boolean,
-    useArtistStyle: Boolean
+    useArtistStyle: Boolean,
+    onSongClick: (Song) -> Unit
 ) {
-    item(key = "${keyPrefix}_album_header_${album.name}") {
-        val containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f)
-        val shape = if (useArtistStyle) {
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f)
+    val shape = remember(useArtistStyle) {
+        if (useArtistStyle) {
             RectangleShape
         } else {
              AbsoluteSmoothCornerShape(
@@ -754,131 +691,119 @@ fun LazyListScope.AlbumSectionItems(
                 cornerRadiusBL = 0.dp, smoothnessAsPercentBL = 0
             )
         }
-        
-        Box(
-             modifier = Modifier
+    }
+    
+    Box(
+         modifier = Modifier
+            .fillMaxWidth()
+            .background(containerColor, shape)
+    ) {
+        Row(
+            modifier = Modifier
                 .fillMaxWidth()
-                .background(containerColor, shape)
+                .padding(horizontal = 16.dp)
+                .padding(top = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
+            SmartImage(
+                model = album.artUri,
+                contentDescription = null,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SmartImage(
-                    model = album.artUri,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = album.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold
                 )
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = album.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "${album.songs.size} songs",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        if(album.songs.isNotEmpty()) onSongClick(album.songs.first())
-                    },
-                    colors = IconButtonDefaults.iconButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = "Play Album")
-                }
+                Text(
+                    text = "${album.songs.size} songs",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(
+                onClick = {
+                    if(album.songs.isNotEmpty()) onSongClick(album.songs.first())
+                },
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(Icons.Rounded.PlayArrow, contentDescription = "Play Album")
             }
         }
     }
-    
-    // Spacing Item
-    item(key = "${keyPrefix}_album_spacer_${album.name}") {
-         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(10.dp)
-                .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
-        )
-    }
+}
 
-    // Songs
-    val songCount = album.songs.size
-    itemsIndexed(
-        items = album.songs,
-        key = { index, song -> song.id }
-    ) { index, song ->
-        val isLastSong = index == songCount - 1
-        
-        // Shape for the SONG ITEM itself (visual ripple/highlight shape)
-        val songItemShape = when {
-            songCount == 1 -> RoundedCornerShape(16.dp)
-            index == 0 -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-            isLastSong -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+@Composable
+fun GenreSongItemWrapper(
+    item: com.theveloper.pixelplay.presentation.viewmodel.GenreDetailListItem.SongItem,
+    stablePlayerState: StablePlayerState,
+    onSongClick: (Song) -> Unit,
+    onMoreOptionsClick: (Song) -> Unit
+) {
+    val song = item.song
+    val isFirstInAlbum = item.isFirstInAlbum
+    val isLastInAlbum = item.isLastInAlbum
+    val isLastAlbumInSection = item.isLastAlbumInSection
+    val useArtistStyle = item.useArtistStyle
+
+    // Optimization: Cache shapes to avoid reallocation during scroll
+    val songItemShape = remember(isFirstInAlbum, isLastInAlbum) {
+        when {
+            isFirstInAlbum && isLastInAlbum -> RoundedCornerShape(16.dp)
+            isFirstInAlbum -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+            isLastInAlbum -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
             else -> RoundedCornerShape(4.dp)
         }
-        
-       // Container Shape (The "Card" background)
-       // If useArtistStyle:
-       //   If isLastAlbumInSection && isLastSong -> BottomRounded.
-       //   Else -> Rect.
-       // If Standalone:
-       //   If isLastSong -> BottomRounded.
-       //   Else -> Rect.
-       
-       val containerShape = if (isLastSong && isLastAlbumInSection) {
+    }
+    
+    val containerShape = remember(isLastInAlbum, isLastAlbumInSection) {
+        if (isLastInAlbum && isLastAlbumInSection) {
             AbsoluteSmoothCornerShape(
                 cornerRadiusTR = 0.dp, smoothnessAsPercentTR = 0,
                 cornerRadiusTL = 0.dp, smoothnessAsPercentTL = 0,
                 cornerRadiusBR = 24.dp, smoothnessAsPercentBR = 60,
                 cornerRadiusBL = 24.dp, smoothnessAsPercentBL = 60
             ) 
-       } else {
+        } else {
            RectangleShape
-       }
-       
-       Box(
-           modifier = Modifier
-               .fillMaxWidth()
-               .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f), containerShape)
-               // Padding internal to the card logic
-               .padding(horizontal = 8.dp) 
-               .padding(bottom = if (isLastSong && !isLastAlbumInSection && useArtistStyle) 8.dp else 0.dp) // Add spacing if there are more albums? No, Divider handles it.
-       ) {
-            // Extra spacing logic handled by `Arrangement.spacedBy(2.dp)` in original column.
-            // Here we are flat items. Content padding?
-            // Original: Column(verticalArrangement = Arrangement.spacedBy(2.dp))
-            // So we need 2.dp padding between songs?
-            // We can add padding to top of items except first one?
+        }
+    }
+   
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f), containerShape)
+            .padding(horizontal = 8.dp) 
+            .padding(bottom = if (isLastInAlbum && !isLastAlbumInSection && useArtistStyle) 8.dp else 0.dp)
+    ) {
+        Column {
+            if (!isFirstInAlbum) Spacer(Modifier.height(2.dp))
             
-            Column {
-                if (index > 0) Spacer(Modifier.height(2.dp))
-                
-                EnhancedSongListItem(
-                     song = song,
-                     isPlaying = stablePlayerState.isPlaying,
-                     isCurrentSong = stablePlayerState.currentSong?.id == song.id,
-                     showAlbumArt = false,
-                     customShape = songItemShape,
-                     onClick = { onSongClick(song) },
-                     onMoreOptionsClick = onMoreOptionsClick
-                 )
-                 
-                 // Bottom spacing for the very last item in the album to push it off the edge of the card?
-                 if (isLastSong) Spacer(Modifier.height(8.dp))
-            }
-       }
+            // Optimization: De-reference stable state values to avoid observing the whole object
+            val isCurrent = stablePlayerState.currentSong?.id == song.id
+            val isPlaying = stablePlayerState.isPlaying
+
+            EnhancedSongListItem(
+                 song = song,
+                 isPlaying = isPlaying,
+                 isCurrentSong = isCurrent,
+                 showAlbumArt = false,
+                 customShape = songItemShape,
+                 onClick = { onSongClick(song) },
+                 onMoreOptionsClick = onMoreOptionsClick
+             )
+             
+             if (isLastInAlbum) Spacer(Modifier.height(8.dp))
+        }
     }
 }
+
