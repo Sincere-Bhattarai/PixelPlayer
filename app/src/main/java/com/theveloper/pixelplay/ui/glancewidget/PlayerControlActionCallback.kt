@@ -3,7 +3,6 @@ package com.theveloper.pixelplay.ui.glancewidget
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
 import androidx.annotation.OptIn
 import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
@@ -44,7 +43,17 @@ class PlayerControlActionCallback : ActionCallback {
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
+                try {
+                    context.startService(serviceIntent)
+                } catch (e: IllegalStateException) {
+                    Timber.tag(TAG).w(
+                        e,
+                        "startService denied in background for action %s; retrying as foreground service",
+                        action
+                    )
+                    serviceIntent.putExtra(MusicService.EXTRA_FORCE_FOREGROUND_ON_START, true)
+                    context.startForegroundService(serviceIntent)
+                }
             } else {
                 context.startService(serviceIntent)
             }

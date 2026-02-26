@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.util.LruCache
+import androidx.core.app.NotificationCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
@@ -35,6 +36,7 @@ import coil.size.Size
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
+import com.theveloper.pixelplay.PixelPlayApplication
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.PlayerInfo
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
@@ -132,6 +134,8 @@ class MusicService : MediaLibraryService() {
         private const val TAG = "MusicService_PixelPlay"
         const val NOTIFICATION_ID = 101
         const val ACTION_SLEEP_TIMER_EXPIRED = "com.theveloper.pixelplay.ACTION_SLEEP_TIMER_EXPIRED"
+        const val EXTRA_FORCE_FOREGROUND_ON_START =
+            "com.theveloper.pixelplay.extra.FORCE_FOREGROUND_ON_START"
 
         private const val APP_PACKAGE_PREFIX = "com.theveloper.pixelplay"
         private val BLOCKED_WEAR_CONTROLLER_PREFIXES = listOf(
@@ -660,13 +664,51 @@ class MusicService : MediaLibraryService() {
         Timber.tag(TAG).d("Sleep timers cancelled from Wear")
     }
 
+    private fun startTemporaryForegroundForCommand() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val notification = NotificationCompat.Builder(
+            this,
+            PixelPlayApplication.NOTIFICATION_CHANNEL_ID
+        )
+            .setSmallIcon(R.drawable.monochrome_player)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.service_processing_action))
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setContentIntent(getOpenAppPendingIntent())
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setOngoing(true)
+            .build()
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to promote service to foreground for external command")
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val forcedForegroundStart =
+            intent?.getBooleanExtra(EXTRA_FORCE_FOREGROUND_ON_START, false) == true
+        if (forcedForegroundStart) {
+            startTemporaryForegroundForCommand()
+        }
+
         intent?.action?.let { action ->
             val player = mediaSession?.player ?: return@let
             when (action) {
                 PlayerActions.PLAY_PAUSE -> player.playWhenReady = !player.playWhenReady
                 PlayerActions.NEXT -> player.seekToNext()
                 PlayerActions.PREVIOUS -> player.seekToPrevious()
+                PlayerActions.FAVORITE -> {
+                    val songId = player.currentMediaItem?.mediaId
+                    if (!songId.isNullOrBlank()) {
+                        serviceScope.launch {
+                            userPreferencesRepository.toggleFavoriteSong(songId)
+                            mediaSession?.let { refreshMediaSessionUi(it) }
+                            requestWidgetFullUpdate(force = true)
+                        }
+                    }
+                }
                 PlayerActions.PLAY_FROM_QUEUE -> {
                     val songId = intent.getLongExtra("song_id", -1L)
                     if (songId != -1L) {
@@ -706,7 +748,20 @@ class MusicService : MediaLibraryService() {
                 }
             }
         }
-        return super.onStartCommand(intent, flags, startId)
+        val startCommandResult = super.onStartCommand(intent, flags, startId)
+        if (forcedForegroundStart) {
+            val player = mediaSession?.player
+            val isActivelyPlaying = player?.let {
+                it.playWhenReady &&
+                    it.playbackState != Player.STATE_IDLE &&
+                    it.playbackState != Player.STATE_ENDED
+            } == true
+            if (!isActivelyPlaying) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelfResult(startId)
+            }
+        }
+        return startCommandResult
     }
 
     private val playerListener = object : Player.Listener {

@@ -105,4 +105,5 @@
     <string name="widget_bar_4x1_desc">Compact player bar</string>
     <string name="widget_control_4x2_desc">Full controls with shuffle and repeat</string>
     <string name="widget_grid_2x2_desc">Minimalist square player</string>
+    <string name="service_processing_action">Processing playback action…</string>
 </resources>
