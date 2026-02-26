@@ -778,7 +778,7 @@ class MusicService : MediaLibraryService() {
             requestWidgetFullUpdate(force = true)
             mediaSession?.let { refreshMediaSessionUi(it) }
             // Apply ReplayGain volume adjustment for the new track
-            applyReplayGain(item)
+            applyReplayGain(mediaSession?.player?.currentMediaItem)
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
