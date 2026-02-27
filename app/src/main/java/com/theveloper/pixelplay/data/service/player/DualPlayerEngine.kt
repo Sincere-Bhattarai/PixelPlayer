@@ -8,6 +8,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -15,6 +16,7 @@ import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.common.Format
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
@@ -277,7 +279,7 @@ class DualPlayerEngine @Inject constructor(
                 // But wait, the parameter 'audioSink' is passed IN. 
                 // We should probably ignore the passed one if we want to enforce ours, OR configure ours and pass it to super.
                 
-                val sink = androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                val sink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(false) // Disable Float output to fix CCodec/Hardware errors on some devices
                     .build()
 
@@ -350,6 +352,15 @@ class DualPlayerEngine @Inject constructor(
             .setLoadControl(loadControl)
             .build().apply {
             setAudioAttributes(audioAttributes, handleAudioFocus)
+            val offloadDisabledPrefs = TrackSelectionParameters.AudioOffloadPreferences.Builder()
+                .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
+                .build()
+            setTrackSelectionParameters(
+                trackSelectionParameters
+                    .buildUpon()
+                    .setAudioOffloadPreferences(offloadDisabledPrefs)
+                    .build()
+            )
             setHandleAudioBecomingNoisy(handleAudioFocus)
             setWakeMode(C.WAKE_MODE_LOCAL) // Use CPU lock only. WiFi lock unused as we proxy via localhost. Saves battery.
             // Explicitly keep both players live so they can overlap without affecting each other

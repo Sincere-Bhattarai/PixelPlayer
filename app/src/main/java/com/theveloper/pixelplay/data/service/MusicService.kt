@@ -33,6 +33,13 @@ import androidx.media3.session.SessionResult
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.size.Size
+import com.google.android.gms.cast.MediaMetadata as CastMediaMetadata
+import com.google.android.gms.cast.MediaStatus
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.SessionManager
+import com.google.android.gms.cast.framework.SessionManagerListener
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
@@ -113,6 +120,7 @@ class MusicService : MediaLibraryService() {
 
     private var favoriteSongIds = emptySet<String>()
     private var mediaSession: MediaLibraryService.MediaLibrarySession? = null
+    private val controllerLastBrowsedParent = mutableMapOf<String, String>()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var keepPlayingInBackground = true
     private var isManualShuffleEnabled = false
@@ -129,6 +137,10 @@ class MusicService : MediaLibraryService() {
         getSystemService(Context.ALARM_SERVICE) as AlarmManager
     }
     private var endOfTrackTimerSongId: String? = null
+    private var castSessionManager: SessionManager? = null
+    private var castSessionManagerListener: SessionManagerListener<CastSession>? = null
+    private var castRemoteClientCallback: RemoteMediaClient.Callback? = null
+    private var observedCastSession: CastSession? = null
 
     companion object {
         private const val TAG = "MusicService_PixelPlay"
@@ -154,6 +166,12 @@ class MusicService : MediaLibraryService() {
             "node",
             "remote_device",
         )
+        private const val AUTO_CONTEXT_RECENT = "recent"
+        private const val AUTO_CONTEXT_FAVORITES = "favorites"
+        private const val AUTO_CONTEXT_ALL_SONGS = "all_songs"
+        private const val AUTO_CONTEXT_ALBUM = "album"
+        private const val AUTO_CONTEXT_ARTIST = "artist"
+        private const val AUTO_CONTEXT_PLAYLIST = "playlist"
     }
 
     override fun onCreate() {
@@ -199,6 +217,7 @@ class MusicService : MediaLibraryService() {
         }
 
         controller.initialize()
+        initializeCastWearSync()
 
         // Restore equalizer state from preferences and attach to audio session.
         // This ensures the equalizer is active even before the user opens the EQ screen.
@@ -316,6 +335,11 @@ class MusicService : MediaLibraryService() {
                     sessionCommandsBuilder.build(),
                     defaultResult.availablePlayerCommands
                 )
+            }
+
+            override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+                clearLastBrowsedParent(controller)
+                super.onDisconnected(session, controller)
             }
 
             override fun onCustomCommand(
@@ -439,6 +463,7 @@ class MusicService : MediaLibraryService() {
             ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
                 return serviceScope.future {
                     try {
+                        rememberLastBrowsedParent(browser, parentId)
                         val children = autoMediaBrowseTree.getChildren(parentId, page, pageSize)
                         LibraryResult.ofItemList(children, params)
                     } catch (e: Exception) {
@@ -512,16 +537,47 @@ class MusicService : MediaLibraryService() {
                 mediaItems: MutableList<MediaItem>
             ): ListenableFuture<MutableList<MediaItem>> {
                 return serviceScope.future {
-                    val songIds = mediaItems.map { it.mediaId }
-                    // Batch resolve songs from repository
-                    val songs = musicRepository.getSongsByIds(songIds).first()
-                    val songMap = songs.associateBy { it.id }
+                    if (mediaItems.size == 1) {
+                        resolveContextQueueForRequestedItem(mediaItems.first(), controller)?.let { queue ->
+                            return@future queue.mediaItems
+                        }
+                    }
+                    resolveMediaItemsByIds(mediaItems)
+                }
+            }
 
-                    mediaItems.map { requestedItem ->
-                        songMap[requestedItem.mediaId]?.let { song ->
-                            MediaItemBuilder.build(song)
-                        } ?: requestedItem
-                    }.toMutableList()
+            override fun onSetMediaItems(
+                mediaSession: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                mediaItems: MutableList<MediaItem>,
+                startIndex: Int,
+                startPositionMs: Long
+            ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+                return serviceScope.future {
+                    val requestedIndex = startIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0))
+                    val requestedItem = mediaItems.getOrNull(requestedIndex)
+
+                    val contextQueue = requestedItem?.let {
+                        resolveContextQueueForRequestedItem(it, controller)
+                    }
+                    if (contextQueue != null) {
+                        return@future MediaSession.MediaItemsWithStartPosition(
+                            contextQueue.mediaItems,
+                            contextQueue.startIndex,
+                            startPositionMs
+                        )
+                    }
+
+                    val resolvedItems = resolveMediaItemsByIds(mediaItems)
+                    val safeStartIndex = requestedIndex.coerceIn(
+                        0,
+                        (resolvedItems.size - 1).coerceAtLeast(0)
+                    )
+                    MediaSession.MediaItemsWithStartPosition(
+                        resolvedItems,
+                        safeStartIndex,
+                        startPositionMs
+                    )
                 }
             }
         }
@@ -536,6 +592,7 @@ class MusicService : MediaLibraryService() {
         }
         setMediaNotificationProvider(localOnlyProvider)
         mediaSession?.let { refreshMediaSessionUi(it) }
+        requestWidgetFullUpdate(force = true)
 
         serviceScope.launch {
             userPreferencesRepository.favoriteSongIdsFlow.collect { ids ->
@@ -923,6 +980,108 @@ class MusicService : MediaLibraryService() {
         player.volume = clampedVolume
     }
 
+    private fun initializeCastWearSync() {
+        val sessionManager = runCatching {
+            CastContext.getSharedInstance(this).sessionManager
+        }.getOrElse { error ->
+            Timber.tag(TAG).w(error, "CastContext unavailable; skipping cast wear sync setup")
+            return
+        }
+        castSessionManager = sessionManager
+
+        val remoteCallback = object : RemoteMediaClient.Callback() {
+            override fun onStatusUpdated() {
+                requestWidgetFullUpdate(force = false)
+            }
+
+            override fun onMetadataUpdated() {
+                requestWidgetFullUpdate(force = false)
+            }
+
+            override fun onQueueStatusUpdated() {
+                requestWidgetFullUpdate(force = false)
+            }
+
+            override fun onPreloadStatusUpdated() {
+                requestWidgetFullUpdate(force = false)
+            }
+        }
+        castRemoteClientCallback = remoteCallback
+
+        val sessionListener = object : SessionManagerListener<CastSession> {
+            override fun onSessionStarted(session: CastSession, sessionId: String) {
+                attachCastRemoteClient(session)
+            }
+
+            override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) {
+                attachCastRemoteClient(session)
+            }
+
+            override fun onSessionEnded(session: CastSession, error: Int) {
+                if (observedCastSession === session) {
+                    attachCastRemoteClient(null)
+                } else {
+                    requestWidgetFullUpdate(force = true)
+                }
+            }
+
+            override fun onSessionStarting(session: CastSession) = Unit
+            override fun onSessionStartFailed(session: CastSession, error: Int) = requestWidgetFullUpdate(force = true)
+            override fun onSessionEnding(session: CastSession) = Unit
+            override fun onSessionResuming(session: CastSession, sessionId: String) = Unit
+            override fun onSessionResumeFailed(session: CastSession, error: Int) = requestWidgetFullUpdate(force = true)
+            override fun onSessionSuspended(session: CastSession, reason: Int) = requestWidgetFullUpdate(force = true)
+        }
+        castSessionManagerListener = sessionListener
+        runCatching {
+            sessionManager.addSessionManagerListener(sessionListener, CastSession::class.java)
+        }.onFailure { e ->
+            Timber.tag(TAG).w(e, "Failed to register Cast session listener")
+        }
+
+        attachCastRemoteClient(sessionManager.currentCastSession)
+    }
+
+    private fun attachCastRemoteClient(session: CastSession?) {
+        if (observedCastSession === session) return
+
+        observedCastSession?.remoteMediaClient?.let { oldClient ->
+            castRemoteClientCallback?.let { callback ->
+                runCatching { oldClient.unregisterCallback(callback) }
+            }
+        }
+
+        observedCastSession = session
+        session?.remoteMediaClient?.let { remoteClient ->
+            castRemoteClientCallback?.let { callback ->
+                runCatching { remoteClient.registerCallback(callback) }
+            }
+            remoteClient.requestStatus()
+        }
+        requestWidgetFullUpdate(force = true)
+    }
+
+    private fun stopCastWearSync() {
+        observedCastSession?.remoteMediaClient?.let { remoteClient ->
+            castRemoteClientCallback?.let { callback ->
+                runCatching { remoteClient.unregisterCallback(callback) }
+            }
+        }
+        observedCastSession = null
+
+        val listener = castSessionManagerListener
+        val manager = castSessionManager
+        if (listener != null && manager != null) {
+            runCatching { manager.removeSessionManagerListener(listener, CastSession::class.java) }
+                .onFailure { e ->
+                    Timber.tag(TAG).w(e, "Failed to remove Cast session listener")
+                }
+        }
+        castSessionManagerListener = null
+        castRemoteClientCallback = null
+        castSessionManager = null
+    }
+
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player
         val allowBackground = keepPlayingInBackground
@@ -948,6 +1107,7 @@ class MusicService : MediaLibraryService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
     override fun onDestroy() {
+        stopCastWearSync()
         wearStatePublisher.clearState()
         replayGainJob?.cancel()
 
@@ -1002,10 +1162,87 @@ class MusicService : MediaLibraryService() {
         }
     }
 
-    private suspend fun processWidgetUpdateInternal() {
+    private data class RemotePlaybackSnapshot(
+        val songId: String?,
+        val title: String,
+        val artist: String,
+        val artworkUri: Uri?,
+        val isPlaying: Boolean,
+        val currentPositionMs: Long,
+        val totalDurationMs: Long,
+        val repeatMode: Int,
+        val isShuffleEnabled: Boolean,
+    )
+
+    private fun resolveCastRemoteSnapshot(): RemotePlaybackSnapshot? {
+        val remoteClient = observedCastSession?.remoteMediaClient
+            ?: castSessionManager?.currentCastSession?.remoteMediaClient
+            ?: return null
+
+        val mediaStatus = remoteClient.mediaStatus ?: return null
+        if (mediaStatus.playerState == MediaStatus.PLAYER_STATE_UNKNOWN) {
+            return null
+        }
+
+        val currentItem = mediaStatus.getQueueItemById(mediaStatus.currentItemId)
+        val mediaInfo = currentItem?.media ?: remoteClient.mediaInfo
+        val metadata = mediaInfo?.metadata
+        if (metadata == null && currentItem == null) {
+            return null
+        }
+
+        val songId = currentItem
+            ?.customData
+            ?.optString("songId")
+            ?.takeIf { it.isNotBlank() }
+
+        val durationHintMs = currentItem
+            ?.customData
+            ?.optLong("durationHintMs", -1L)
+            ?.takeIf { it > 0L }
+
+        val streamDurationMs = remoteClient.streamDuration.takeIf { it > 0L }
+        val effectiveDurationMs = (streamDurationMs ?: durationHintMs ?: 0L).coerceAtLeast(0L)
+        val imageUri = metadata
+            ?.images
+            ?.firstOrNull()
+            ?.url
+            ?.toString()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { Uri.parse(it) }
+
+        val mappedRepeatMode = when (mediaStatus.queueRepeatMode) {
+            MediaStatus.REPEAT_MODE_REPEAT_SINGLE -> Player.REPEAT_MODE_ONE
+            MediaStatus.REPEAT_MODE_REPEAT_ALL,
+            MediaStatus.REPEAT_MODE_REPEAT_ALL_AND_SHUFFLE -> Player.REPEAT_MODE_ALL
+            else -> Player.REPEAT_MODE_OFF
+        }
+
+        return RemotePlaybackSnapshot(
+            songId = songId,
+            title = metadata?.getString(CastMediaMetadata.KEY_TITLE).orEmpty(),
+            artist = metadata?.getString(CastMediaMetadata.KEY_ARTIST).orEmpty(),
+            artworkUri = imageUri,
+            isPlaying = mediaStatus.playerState == MediaStatus.PLAYER_STATE_PLAYING,
+            currentPositionMs = remoteClient.approximateStreamPosition.coerceAtLeast(0L),
+            totalDurationMs = effectiveDurationMs,
+            repeatMode = mappedRepeatMode,
+            isShuffleEnabled = mediaStatus.queueRepeatMode == MediaStatus.REPEAT_MODE_REPEAT_ALL_AND_SHUFFLE,
+        )
+    }
+
+    private suspend fun resolveCurrentMediaIdForWear(): String? {
+        val remoteSongId = resolveCastRemoteSnapshot()?.songId
+        if (!remoteSongId.isNullOrBlank()) {
+            return remoteSongId
+        }
         val player = engine.masterPlayer
-        val currentMediaId = withContext(Dispatchers.Main) { player.currentMediaItem?.mediaId }
+        return withContext(Dispatchers.Main) { player.currentMediaItem?.mediaId }
+    }
+
+    private suspend fun processWidgetUpdateInternal() {
         val playerInfo = buildPlayerInfo()
+        val currentMediaId = resolveCurrentMediaIdForWear()
         updateGlanceWidgets(playerInfo)
         // Publish state to Wear OS watch
         wearStatePublisher.publishState(currentMediaId, playerInfo)
@@ -1032,13 +1269,36 @@ class MusicService : MediaLibraryService() {
             snapshotTimeline = player.currentTimeline
         }
 
-        val shuffleEnabled = isManualShuffleEnabled // Manual shuffle for sync with PlayerViewModel
+        var shuffleEnabled = isManualShuffleEnabled // Manual shuffle for sync with PlayerViewModel
 
-        val title = currentItem?.mediaMetadata?.title?.toString().orEmpty()
-        val artist = currentItem?.mediaMetadata?.artist?.toString().orEmpty()
-        val mediaId = currentItem?.mediaId
-        val artworkUri = currentItem?.mediaMetadata?.artworkUri
-        val artworkData = currentItem?.mediaMetadata?.artworkData
+        var title = currentItem?.mediaMetadata?.title?.toString().orEmpty()
+        var artist = currentItem?.mediaMetadata?.artist?.toString().orEmpty()
+        var mediaId = currentItem?.mediaId
+        var artworkUri = currentItem?.mediaMetadata?.artworkUri
+        var artworkData = currentItem?.mediaMetadata?.artworkData
+
+        resolveCastRemoteSnapshot()?.let { remote ->
+            if (!remote.title.isNullOrBlank()) {
+                title = remote.title
+            }
+            if (!remote.artist.isNullOrBlank()) {
+                artist = remote.artist
+            }
+            if (!remote.songId.isNullOrBlank()) {
+                mediaId = remote.songId
+            }
+            if (remote.artworkUri != null) {
+                artworkUri = remote.artworkUri
+                artworkData = null
+            }
+            isPlaying = remote.isPlaying
+            currentPosition = remote.currentPositionMs
+            if (remote.totalDurationMs > 0L) {
+                totalDuration = remote.totalDurationMs
+            }
+            repeatMode = remote.repeatMode
+            shuffleEnabled = remote.isShuffleEnabled
+        }
 
         val (artBytes, artUriString) = getAlbumArtForWidget(artworkData, artworkUri)
 
@@ -1371,8 +1631,117 @@ class MusicService : MediaLibraryService() {
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
     }
 
+    private data class ContextQueueResolution(
+        val mediaItems: MutableList<MediaItem>,
+        val startIndex: Int
+    )
+
+    private fun controllerKey(controller: MediaSession.ControllerInfo): String {
+        return "${controller.packageName}:${controller.uid}"
+    }
+
+    private fun rememberLastBrowsedParent(controller: MediaSession.ControllerInfo, parentId: String) {
+        synchronized(controllerLastBrowsedParent) {
+            controllerLastBrowsedParent[controllerKey(controller)] = parentId
+        }
+    }
+
+    private fun getLastBrowsedParent(controller: MediaSession.ControllerInfo): String? {
+        return synchronized(controllerLastBrowsedParent) {
+            controllerLastBrowsedParent[controllerKey(controller)]
+        }
+    }
+
+    private fun clearLastBrowsedParent(controller: MediaSession.ControllerInfo) {
+        synchronized(controllerLastBrowsedParent) {
+            controllerLastBrowsedParent.remove(controllerKey(controller))
+        }
+    }
+
+    private suspend fun resolveContextQueueForRequestedItem(
+        requestedItem: MediaItem,
+        controller: MediaSession.ControllerInfo
+    ): ContextQueueResolution? {
+        var contextType = requestedItem.mediaMetadata.extras
+            ?.getString(AutoMediaBrowseTree.CONTEXT_TYPE_EXTRA)
+        var contextId = requestedItem.mediaMetadata.extras
+            ?.getString(AutoMediaBrowseTree.CONTEXT_ID_EXTRA)
+
+        if (contextType.isNullOrBlank()) {
+            val parentId = requestedItem.mediaMetadata.extras
+                ?.getString(AutoMediaBrowseTree.CONTEXT_PARENT_ID_EXTRA)
+                ?: getLastBrowsedParent(controller)
+            val parentContext = parentId?.let { resolveAutoContextFromParentId(it) }
+            contextType = parentContext?.first
+            contextId = parentContext?.second
+        }
+
+        if (contextType.isNullOrBlank()) {
+            return null
+        }
+
+        val queueSongs = autoMediaBrowseTree.getSongsForContext(contextType, contextId)
+        if (queueSongs.isEmpty()) {
+            return null
+        }
+
+        val startIndex = queueSongs.indexOfFirst { it.id == requestedItem.mediaId }
+        if (startIndex < 0) {
+            return null
+        }
+
+        val queueMediaItems = queueSongs.map { song ->
+            MediaItemBuilder.build(song)
+        }.toMutableList()
+
+        return ContextQueueResolution(
+            mediaItems = queueMediaItems,
+            startIndex = startIndex
+        )
+    }
+
+    private suspend fun resolveMediaItemsByIds(requestedItems: List<MediaItem>): MutableList<MediaItem> {
+        val songIds = requestedItems.map { it.mediaId }
+        val songs = musicRepository.getSongsByIds(songIds).first()
+        val songMap = songs.associateBy { it.id }
+
+        return requestedItems.map { requestedItem ->
+            songMap[requestedItem.mediaId]?.let { song ->
+                MediaItemBuilder.build(song)
+            } ?: requestedItem
+        }.toMutableList()
+    }
+
+    private fun resolveAutoContextFromParentId(parentId: String): Pair<String, String?>? {
+        return when {
+            parentId == AutoMediaBrowseTree.RECENT_ID -> AUTO_CONTEXT_RECENT to null
+            parentId == AutoMediaBrowseTree.FAVORITES_ID -> AUTO_CONTEXT_FAVORITES to null
+            parentId == AutoMediaBrowseTree.SONGS_ID -> AUTO_CONTEXT_ALL_SONGS to null
+            parentId.startsWith(AutoMediaBrowseTree.ALBUM_PREFIX) -> {
+                AUTO_CONTEXT_ALBUM to parentId.removePrefix(AutoMediaBrowseTree.ALBUM_PREFIX)
+            }
+            parentId.startsWith(AutoMediaBrowseTree.ARTIST_PREFIX) -> {
+                AUTO_CONTEXT_ARTIST to parentId.removePrefix(AutoMediaBrowseTree.ARTIST_PREFIX)
+            }
+            parentId.startsWith(AutoMediaBrowseTree.PLAYLIST_PREFIX) -> {
+                AUTO_CONTEXT_PLAYLIST to parentId.removePrefix(AutoMediaBrowseTree.PLAYLIST_PREFIX)
+            }
+            else -> null
+        }
+    }
+
     private fun buildMediaButtonPreferences(session: MediaSession): List<CommandButton> {
         val player = session.player
+        val previousButton = CommandButton.Builder(CommandButton.ICON_PREVIOUS)
+            .setDisplayName("Previous")
+            .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            .build()
+
+        val nextButton = CommandButton.Builder(CommandButton.ICON_NEXT)
+            .setDisplayName("Next")
+            .setPlayerCommand(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .build()
+
         val songId = player.currentMediaItem?.mediaId
         val isFavorite = isSongFavorite(songId)
         val likeButton = CommandButton.Builder(
@@ -1406,7 +1775,7 @@ class MusicService : MediaLibraryService() {
             .setSessionCommand(SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_CYCLE_REPEAT_MODE, Bundle.EMPTY))
             .build()
 
-        return listOf(likeButton, shuffleButton, repeatButton)
+        return listOf(previousButton, nextButton, likeButton, shuffleButton, repeatButton)
     }
 
     // ------------------------

@@ -1,7 +1,7 @@
 package com.theveloper.pixelplay.data.service.auto
 
 import android.net.Uri
-import androidx.core.net.toUri
+import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.theveloper.pixelplay.data.database.EngagementDao
@@ -11,6 +11,7 @@ import com.theveloper.pixelplay.data.model.Playlist
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
+import com.theveloper.pixelplay.utils.MediaItemBuilder
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,14 +32,22 @@ class AutoMediaBrowseTree @Inject constructor(
         const val ARTISTS_ID = "ARTISTS"
         const val SONGS_ID = "SONGS"
 
-        private const val ALBUM_PREFIX = "ALBUM_"
-        private const val ARTIST_PREFIX = "ARTIST_"
-        private const val PLAYLIST_PREFIX = "PLAYLIST_"
+        const val ALBUM_PREFIX = "ALBUM_"
+        const val ARTIST_PREFIX = "ARTIST_"
+        const val PLAYLIST_PREFIX = "PLAYLIST_"
+
+        const val CONTEXT_TYPE_EXTRA = "com.theveloper.pixelplay.auto.extra.CONTEXT_TYPE"
+        const val CONTEXT_ID_EXTRA = "com.theveloper.pixelplay.auto.extra.CONTEXT_ID"
+        const val CONTEXT_PARENT_ID_EXTRA = "com.theveloper.pixelplay.auto.extra.CONTEXT_PARENT_ID"
+
+        private const val CONTEXT_TYPE_RECENT = "recent"
+        private const val CONTEXT_TYPE_FAVORITES = "favorites"
+        private const val CONTEXT_TYPE_ALL_SONGS = "all_songs"
+        private const val CONTEXT_TYPE_ALBUM = "album"
+        private const val CONTEXT_TYPE_ARTIST = "artist"
+        private const val CONTEXT_TYPE_PLAYLIST = "playlist"
 
         private const val MAX_RECENT_SONGS = 50
-        private const val MAX_SONGS = 500
-        private const val MAX_ALBUMS = 200
-        private const val MAX_ARTISTS = 200
         private const val MAX_SEARCH_RESULTS = 30
     }
 
@@ -54,8 +63,11 @@ class AutoMediaBrowseTree @Inject constructor(
     }
 
     suspend fun getChildren(parentId: String, page: Int, pageSize: Int): List<MediaItem> {
+        val effectivePage = page.coerceAtLeast(0)
         val effectivePageSize = if (pageSize > 0) pageSize else Int.MAX_VALUE
-        val offset = page * effectivePageSize
+        val offset = (effectivePage.toLong() * effectivePageSize.toLong())
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
 
         return when (parentId) {
             ROOT_ID -> getRootItems()
@@ -124,19 +136,10 @@ class AutoMediaBrowseTree @Inject constructor(
     // --- Private helpers ---
 
     private suspend fun getRecentSongs(offset: Int, limit: Int): List<MediaItem> {
-        val engagements = engagementDao.getRecentlyPlayedSongs(MAX_RECENT_SONGS)
-        if (engagements.isEmpty()) return emptyList()
-
-        val songIds = engagements.map { it.songId }
-        val songs = musicRepository.getSongsByIds(songIds).first()
-        val songsById = songs.associateBy { it.id }
-
-        // Maintain engagement order (most recently played first)
-        return songIds
-            .mapNotNull { id -> songsById[id] }
+        return getRecentSongList()
             .drop(offset)
             .take(limit)
-            .map { buildPlayableSongItem(it) }
+            .map { buildPlayableSongItem(it, CONTEXT_TYPE_RECENT, null, RECENT_ID) }
     }
 
     private suspend fun getFavoriteSongs(offset: Int, limit: Int): List<MediaItem> {
@@ -144,7 +147,7 @@ class AutoMediaBrowseTree @Inject constructor(
         return songs
             .drop(offset)
             .take(limit)
-            .map { buildPlayableSongItem(it) }
+            .map { buildPlayableSongItem(it, CONTEXT_TYPE_FAVORITES, null, FAVORITES_ID) }
     }
 
     private suspend fun getPlaylists(offset: Int, limit: Int): List<MediaItem> {
@@ -158,7 +161,6 @@ class AutoMediaBrowseTree @Inject constructor(
     private suspend fun getAlbums(offset: Int, limit: Int): List<MediaItem> {
         val albums = musicRepository.getAllAlbumsOnce()
         return albums
-            .take(MAX_ALBUMS)
             .drop(offset)
             .take(limit)
             .map { buildBrowsableAlbumItem(it) }
@@ -167,7 +169,6 @@ class AutoMediaBrowseTree @Inject constructor(
     private suspend fun getArtists(offset: Int, limit: Int): List<MediaItem> {
         val artists = musicRepository.getAllArtistsOnce()
         return artists
-            .take(MAX_ARTISTS)
             .drop(offset)
             .take(limit)
             .map { buildBrowsableArtistItem(it) }
@@ -176,39 +177,74 @@ class AutoMediaBrowseTree @Inject constructor(
     private suspend fun getAllSongs(offset: Int, limit: Int): List<MediaItem> {
         val songs = musicRepository.getAllSongsOnce()
         return songs
-            .take(MAX_SONGS)
             .drop(offset)
             .take(limit)
-            .map { buildPlayableSongItem(it) }
+            .map { buildPlayableSongItem(it, CONTEXT_TYPE_ALL_SONGS, null, SONGS_ID) }
     }
 
     private suspend fun getChildrenForPrefix(parentId: String, offset: Int, limit: Int): List<MediaItem> {
-        return when {
-            parentId.startsWith(ALBUM_PREFIX) -> {
-                val albumId = parentId.removePrefix(ALBUM_PREFIX).toLongOrNull() ?: return emptyList()
-                val songs = musicRepository.getSongsForAlbum(albumId).first()
-                songs.drop(offset).take(limit).map { buildPlayableSongItem(it) }
+        val context = resolveContextFromParent(parentId) ?: return emptyList()
+        val songs = getSongsForContext(context.first, context.second)
+        return songs.drop(offset)
+            .take(limit)
+            .map { song ->
+                buildPlayableSongItem(
+                    song = song,
+                    contextType = context.first,
+                    contextId = context.second,
+                    parentId = parentId
+                )
             }
-            parentId.startsWith(ARTIST_PREFIX) -> {
-                val artistId = parentId.removePrefix(ARTIST_PREFIX).toLongOrNull() ?: return emptyList()
-                val songs = musicRepository.getSongsForArtist(artistId).first()
-                songs.drop(offset).take(limit).map { buildPlayableSongItem(it) }
+    }
+
+    suspend fun getSongsForContext(contextType: String, contextId: String?): List<Song> {
+        return when (contextType) {
+            CONTEXT_TYPE_RECENT -> getRecentSongList()
+            CONTEXT_TYPE_FAVORITES -> musicRepository.getFavoriteSongsOnce()
+            CONTEXT_TYPE_ALL_SONGS -> musicRepository.getAllSongsOnce()
+            CONTEXT_TYPE_ALBUM -> {
+                val albumId = contextId?.toLongOrNull() ?: return emptyList()
+                musicRepository.getSongsForAlbum(albumId).first()
             }
-            parentId.startsWith(PLAYLIST_PREFIX) -> {
-                val playlistId = parentId.removePrefix(PLAYLIST_PREFIX)
+            CONTEXT_TYPE_ARTIST -> {
+                val artistId = contextId?.toLongOrNull() ?: return emptyList()
+                musicRepository.getSongsForArtist(artistId).first()
+            }
+            CONTEXT_TYPE_PLAYLIST -> {
+                val playlistId = contextId ?: return emptyList()
                 val playlist = userPreferencesRepository.userPlaylistsFlow.first()
                     .find { it.id == playlistId } ?: return emptyList()
                 val songs = musicRepository.getSongsByIds(playlist.songIds).first()
-                // Maintain playlist order
                 val songsById = songs.associateBy { it.id }
-                playlist.songIds
-                    .mapNotNull { id -> songsById[id] }
-                    .drop(offset)
-                    .take(limit)
-                    .map { buildPlayableSongItem(it) }
+                playlist.songIds.mapNotNull { id -> songsById[id] }
             }
             else -> emptyList()
         }
+    }
+
+    private fun resolveContextFromParent(parentId: String): Pair<String, String?>? {
+        return when {
+            parentId.startsWith(ALBUM_PREFIX) -> {
+                CONTEXT_TYPE_ALBUM to parentId.removePrefix(ALBUM_PREFIX)
+            }
+            parentId.startsWith(ARTIST_PREFIX) -> {
+                CONTEXT_TYPE_ARTIST to parentId.removePrefix(ARTIST_PREFIX)
+            }
+            parentId.startsWith(PLAYLIST_PREFIX) -> {
+                CONTEXT_TYPE_PLAYLIST to parentId.removePrefix(PLAYLIST_PREFIX)
+            }
+            else -> null
+        }
+    }
+
+    private suspend fun getRecentSongList(): List<Song> {
+        val engagements = engagementDao.getRecentlyPlayedSongs(MAX_RECENT_SONGS)
+        if (engagements.isEmpty()) return emptyList()
+
+        val songIds = engagements.map { it.songId }
+        val songs = musicRepository.getSongsByIds(songIds).first()
+        val songsById = songs.associateBy { it.id }
+        return songIds.mapNotNull { id -> songsById[id] }
     }
 
     // --- MediaItem builders ---
@@ -232,7 +268,17 @@ class AutoMediaBrowseTree @Inject constructor(
             .build()
     }
 
-    private fun buildPlayableSongItem(song: Song): MediaItem {
+    private fun buildPlayableSongItem(
+        song: Song,
+        contextType: String? = null,
+        contextId: String? = null,
+        parentId: String? = null
+    ): MediaItem {
+        val contextExtras = Bundle().apply {
+            contextType?.let { putString(CONTEXT_TYPE_EXTRA, it) }
+            contextId?.let { putString(CONTEXT_ID_EXTRA, it) }
+            parentId?.let { putString(CONTEXT_PARENT_ID_EXTRA, it) }
+        }
         val metadata = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.displayArtist)
@@ -240,7 +286,10 @@ class AutoMediaBrowseTree @Inject constructor(
             .setIsBrowsable(false)
             .setIsPlayable(true)
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-        song.albumArtUriString?.toUri()?.let { metadata.setArtworkUri(it) }
+        if (!contextExtras.isEmpty) {
+            metadata.setExtras(contextExtras)
+        }
+        MediaItemBuilder.artworkUri(song.albumArtUriString)?.let { metadata.setArtworkUri(it) }
 
         return MediaItem.Builder()
             .setMediaId(song.id)
@@ -255,7 +304,7 @@ class AutoMediaBrowseTree @Inject constructor(
             .setIsBrowsable(true)
             .setIsPlayable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS)
-        album.albumArtUriString?.toUri()?.let { metadata.setArtworkUri(it) }
+        MediaItemBuilder.artworkUri(album.albumArtUriString)?.let { metadata.setArtworkUri(it) }
 
         return MediaItem.Builder()
             .setMediaId(ALBUM_PREFIX + album.id)
@@ -269,7 +318,7 @@ class AutoMediaBrowseTree @Inject constructor(
             .setIsBrowsable(true)
             .setIsPlayable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS)
-        artist.effectiveImageUrl?.toUri()?.let { metadata.setArtworkUri(it) }
+        MediaItemBuilder.artworkUri(artist.effectiveImageUrl)?.let { metadata.setArtworkUri(it) }
 
         return MediaItem.Builder()
             .setMediaId(ARTIST_PREFIX + artist.id)
@@ -283,7 +332,7 @@ class AutoMediaBrowseTree @Inject constructor(
             .setIsBrowsable(true)
             .setIsPlayable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS)
-        playlist.coverImageUri?.toUri()?.let { metadata.setArtworkUri(it) }
+        MediaItemBuilder.artworkUri(playlist.coverImageUri)?.let { metadata.setArtworkUri(it) }
 
         return MediaItem.Builder()
             .setMediaId(PLAYLIST_PREFIX + playlist.id)

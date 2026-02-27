@@ -43,6 +43,14 @@ data class WearLocalPlayerState(
     val isEmpty: Boolean get() = songId.isEmpty()
 }
 
+data class WearQueueSong(
+    val songId: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val uri: Uri,
+)
+
 /**
  * Repository managing ExoPlayer for standalone local playback on the watch.
  * Plays audio files that have been transferred from the phone and stored locally.
@@ -72,6 +80,7 @@ class WearLocalPlayerRepository @Inject constructor(
 
     private var positionUpdateJob: Job? = null
     private var currentQueueSongsById: Map<String, LocalSongEntity> = emptyMap()
+    private var currentQueueItemsById: Map<String, WearQueueSong> = emptyMap()
     private var lastPaletteSongId: String = ""
     private var lastArtworkSongId: String = ""
 
@@ -118,12 +127,60 @@ class WearLocalPlayerRepository @Inject constructor(
                 return@launch
             }
 
+            val queueSongs = playableSongs.map { song ->
+                WearQueueSong(
+                    songId = song.songId,
+                    title = song.title,
+                    artist = song.artist,
+                    album = song.album,
+                    uri = Uri.fromFile(File(song.localPath)),
+                )
+            }
+            startPlayback(
+                queueSongs = queueSongs,
+                queueSongIdToLocal = playableSongs.associateBy { it.songId },
+                startIndex = startIndex,
+            )
+        }
+    }
+
+    /**
+     * Start local playback from watch MediaStore songs.
+     */
+    fun playUriSongs(songs: List<WearQueueSong>, startIndex: Int = 0) {
+        scope.launch {
+            if (songs.isEmpty()) {
+                Timber.tag(TAG).w("No watch library songs available")
+                return@launch
+            }
+            startPlayback(
+                queueSongs = songs,
+                queueSongIdToLocal = emptyMap(),
+                startIndex = startIndex,
+            )
+        }
+    }
+
+    private suspend fun startPlayback(
+        queueSongs: List<WearQueueSong>,
+        queueSongIdToLocal: Map<String, LocalSongEntity>,
+        startIndex: Int,
+    ) {
+        withContext(Dispatchers.Main) {
             val player = getOrCreatePlayer()
-            currentQueueSongsById = playableSongs.associateBy { it.songId }
-            val mediaItems = playableSongs.map { song ->
+            currentQueueSongsById = queueSongIdToLocal
+            currentQueueItemsById = queueSongs.associateBy { it.songId }
+            if (queueSongIdToLocal.isEmpty()) {
+                lastPaletteSongId = ""
+                lastArtworkSongId = ""
+                _localPaletteSeedArgb.value = null
+                _localAlbumArt.value = null
+            }
+
+            val mediaItems = queueSongs.map { song ->
                 MediaItem.Builder()
                     .setMediaId(song.songId)
-                    .setUri(Uri.fromFile(File(song.localPath)))
+                    .setUri(song.uri)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
                             .setTitle(song.title)
@@ -140,7 +197,7 @@ class WearLocalPlayerRepository @Inject constructor(
             _isLocalPlaybackActive.value = true
             updateState()
             Timber.tag(TAG).d(
-                "Playing locally: ${playableSongs.getOrNull(startIndexSafe)?.title}, queue=${playableSongs.size}"
+                "Playing locally: ${queueSongs.getOrNull(startIndexSafe)?.title}, queue=${queueSongs.size}"
             )
         }
     }
@@ -188,6 +245,7 @@ class WearLocalPlayerRepository @Inject constructor(
         _localPaletteSeedArgb.value = null
         _localAlbumArt.value = null
         currentQueueSongsById = emptyMap()
+        currentQueueItemsById = emptyMap()
         lastPaletteSongId = ""
         lastArtworkSongId = ""
         Timber.tag(TAG).d("ExoPlayer released")
@@ -241,24 +299,34 @@ class WearLocalPlayerRepository @Inject constructor(
         }
 
         _localPaletteSeedArgb.value = null
-        if (queueSong == null) return
-
-        scope.launch(Dispatchers.IO) {
-            val extractedSeed = extractSeedFromLocalSong(queueSong)
-            if (extractedSeed != null) {
-                runCatching { localSongDao.updatePaletteSeed(queueSong.songId, extractedSeed) }
-                    .onFailure { error ->
-                        Timber.tag(TAG).w(error, "Failed to persist local palette seed")
-                    }
-            }
-
-            withContext(Dispatchers.Main) {
-                if (lastPaletteSongId != queueSong.songId) return@withContext
+        if (queueSong != null) {
+            scope.launch(Dispatchers.IO) {
+                val extractedSeed = extractSeedFromLocalSong(queueSong)
                 if (extractedSeed != null) {
-                    currentQueueSongsById = currentQueueSongsById.toMutableMap().apply {
-                        put(queueSong.songId, queueSong.copy(paletteSeedArgb = extractedSeed))
-                    }
+                    runCatching { localSongDao.updatePaletteSeed(queueSong.songId, extractedSeed) }
+                        .onFailure { error ->
+                            Timber.tag(TAG).w(error, "Failed to persist local palette seed")
+                        }
                 }
+
+                withContext(Dispatchers.Main) {
+                    if (lastPaletteSongId != queueSong.songId) return@withContext
+                    if (extractedSeed != null) {
+                        currentQueueSongsById = currentQueueSongsById.toMutableMap().apply {
+                            put(queueSong.songId, queueSong.copy(paletteSeedArgb = extractedSeed))
+                        }
+                    }
+                    _localPaletteSeedArgb.value = extractedSeed
+                }
+            }
+            return
+        }
+
+        val queueItem = currentQueueItemsById[songId] ?: return
+        scope.launch(Dispatchers.IO) {
+            val extractedSeed = extractSeedFromUri(queueItem.uri, queueItem.songId)
+            withContext(Dispatchers.Main) {
+                if (lastPaletteSongId != queueItem.songId) return@withContext
                 _localPaletteSeedArgb.value = extractedSeed
             }
         }
@@ -274,15 +342,26 @@ class WearLocalPlayerRepository @Inject constructor(
         lastArtworkSongId = songId
 
         val queueSong = currentQueueSongsById[songId]
-        if (queueSong == null) {
-            _localAlbumArt.value = null
+        if (queueSong != null) {
+            scope.launch(Dispatchers.IO) {
+                val bitmap = loadLocalAlbumArtBitmap(queueSong)
+                withContext(Dispatchers.Main) {
+                    if (lastArtworkSongId != queueSong.songId) return@withContext
+                    _localAlbumArt.value = bitmap
+                }
+            }
             return
         }
 
+        val queueItem = currentQueueItemsById[songId]
+        if (queueItem == null) {
+            _localAlbumArt.value = null
+            return
+        }
         scope.launch(Dispatchers.IO) {
-            val bitmap = loadLocalAlbumArtBitmap(queueSong)
+            val bitmap = loadArtworkBitmapFromUri(queueItem.uri, queueItem.songId)
             withContext(Dispatchers.Main) {
-                if (lastArtworkSongId != queueSong.songId) return@withContext
+                if (lastArtworkSongId != queueItem.songId) return@withContext
                 _localAlbumArt.value = bitmap
             }
         }
@@ -387,6 +466,48 @@ class WearLocalPlayerRepository @Inject constructor(
             }
         } catch (e: Exception) {
             Timber.tag(TAG).w(e, "Failed to extract local artwork seed for songId=${song.songId}")
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun extractSeedFromUri(uri: Uri, songId: String): Int? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(application, uri)
+            val embedded = retriever.embeddedPicture ?: return null
+            val bitmap = BitmapFactory.decodeByteArray(
+                embedded,
+                0,
+                embedded.size,
+                BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                    inSampleSize = 2
+                },
+            ) ?: return null
+
+            try {
+                extractSeedColorArgb(bitmap)
+            } finally {
+                bitmap.recycle()
+            }
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to extract artwork seed from URI for songId=$songId")
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun loadArtworkBitmapFromUri(uri: Uri, songId: String): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(application, uri)
+            val embedded = retriever.embeddedPicture ?: return null
+            decodeBoundedBitmapFromBytes(embedded, maxDimension = 1024)
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to load artwork from URI for songId=$songId")
             null
         } finally {
             runCatching { retriever.release() }

@@ -185,6 +185,13 @@ fun FileExplorerContent(
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
+    val safeSelectedStorageIndex = remember(availableStorages, selectedStorageIndex) {
+        if (availableStorages.isEmpty()) {
+            0
+        } else {
+            selectedStorageIndex.coerceIn(0, availableStorages.lastIndex)
+        }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -264,12 +271,12 @@ fun FileExplorerContent(
                 PrimaryTabRow(
                     modifier = Modifier
                         .fillMaxWidth(),
-                    selectedTabIndex = selectedStorageIndex,
+                    selectedTabIndex = safeSelectedStorageIndex,
                     containerColor = Color.Transparent,
                     indicator = {
                         TabRowDefaults.PrimaryIndicator(
                             modifier = Modifier.tabIndicatorOffset(
-                                selectedTabIndex = selectedStorageIndex,
+                                selectedTabIndex = safeSelectedStorageIndex,
                                 matchContentSize = true
                             ),
                             height = 3.dp,
@@ -278,32 +285,19 @@ fun FileExplorerContent(
                     },
                     divider = {}
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(0.dp)
-                    ) {
-                        availableStorages.forEachIndexed { index, storage ->
-                            if (index == 0) {
-                                Spacer(modifier = Modifier.width(14.dp))
-                            }
-                            TabAnimation(
-                                modifier = Modifier.weight(1f),
-                                index = index,
-                                title = storage.displayName,
-                                selectedIndex = selectedStorageIndex,
-                                onClick = { onStorageSelected(index) }
-                            ) {
-                                Text(
-                                    text = storage.displayName,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    fontFamily = GoogleSansRounded
-                                )
-                            }
-                            if (index == availableStorages.lastIndex) {
-                                Spacer(modifier = Modifier.width(14.dp))
-                            }
+                    availableStorages.forEachIndexed { index, storage ->
+                        TabAnimation(
+                            index = index,
+                            title = storage.displayName,
+                            selectedIndex = safeSelectedStorageIndex,
+                            onClick = { onStorageSelected(index) }
+                        ) {
+                            Text(
+                                text = storage.displayName,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                fontFamily = GoogleSansRounded
+                            )
                         }
                     }
                 }

@@ -133,7 +133,7 @@ class WearPlaybackController @Inject constructor(
             val nodes = nodeClient.connectedNodes.await()
             if (nodes.isEmpty()) {
                 stateRepository.setPhoneConnected(false)
-                Timber.tag(TAG).w("No connected nodes found — phone not reachable")
+                Timber.tag(TAG).w("No connected nodes found — phone not reachable (path=%s)", path)
                 return
             }
             stateRepository.setPhoneConnected(true)
@@ -142,15 +142,33 @@ class WearPlaybackController @Inject constructor(
             // Send to all connected nodes (typically just one phone)
             nodes.forEach { node ->
                 try {
+                    Timber.tag(TAG).d(
+                        "Sending message path=%s bytes=%d nodeId=%s nodeName=%s",
+                        path,
+                        data.size,
+                        node.id,
+                        node.displayName
+                    )
                     messageClient.sendMessage(node.id, path, data).await()
-                    Timber.tag(TAG).d("Sent message to ${node.displayName} on $path")
+                    Timber.tag(TAG).d(
+                        "Sent message path=%s nodeId=%s nodeName=%s",
+                        path,
+                        node.id,
+                        node.displayName
+                    )
                 } catch (e: Exception) {
-                    Timber.tag(TAG).e(e, "Failed to send message to ${node.displayName}")
+                    Timber.tag(TAG).e(
+                        e,
+                        "Failed to send message path=%s nodeId=%s nodeName=%s",
+                        path,
+                        node.id,
+                        node.displayName
+                    )
                 }
             }
         } catch (e: Exception) {
             stateRepository.setPhoneConnected(false)
-            Timber.tag(TAG).e(e, "Failed to get connected nodes")
+            Timber.tag(TAG).e(e, "Failed to get connected nodes for path=%s", path)
         }
     }
 }

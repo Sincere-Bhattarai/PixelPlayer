@@ -158,21 +158,21 @@ fun RoundedHorizontalMultiBrowseCarousel(
     }
 
     if (carouselStyle == CarouselStyle.NO_PEEK) {
+        val settleEpsilon = 0.001f
         LaunchedEffect(state.pagerState) {
-            snapshotFlow { state.pagerState.isScrollInProgress }
+            snapshotFlow {
+                state.pagerState.isScrollInProgress to state.pagerState.currentPageOffsetFraction
+            }
                 .distinctUntilChanged()
-                .collect { inProgress ->
-                    if (!inProgress) {
-                        val pageCount = state.pagerState.pageCount
-                        if (pageCount == 0) return@collect
-                        val currentPage = state.pagerState.currentPage
-                        val offset = state.pagerState.currentPageOffsetFraction
-                        if (offset != 0f) {
-                            val targetPage = (currentPage + offset.roundToInt())
-                                .coerceIn(0, pageCount - 1)
-                            state.animateScrollToItem(targetPage)
-                        }
-                    }
+                .collect { (inProgress, offset) ->
+                    if (inProgress || abs(offset) <= settleEpsilon) return@collect
+
+                    val pageCount = state.pagerState.pageCount
+                    if (pageCount == 0) return@collect
+
+                    // NO_PEEK must never stay visually between two album arts.
+                    val targetPage = state.pagerState.currentPage.coerceIn(0, pageCount - 1)
+                    state.scrollToItem(targetPage)
                 }
         }
     }

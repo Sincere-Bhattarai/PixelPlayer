@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -39,6 +40,11 @@ class WearPlayerViewModel @Inject constructor(
     private val localPlayerRepository: WearLocalPlayerRepository,
     private val volumeRepository: WearVolumeRepository,
 ) : ViewModel() {
+    companion object {
+        private const val PHONE_SYNC_BOOTSTRAP_ATTEMPTS = 3
+        private const val PHONE_SYNC_BOOTSTRAP_RETRY_DELAY_MS = 1200L
+    }
+
     private val _sleepTimerUiState = MutableStateFlow(WearSleepTimerUiState())
     val sleepTimerUiState: StateFlow<WearSleepTimerUiState> = _sleepTimerUiState.asStateFlow()
 
@@ -132,6 +138,28 @@ class WearPlayerViewModel @Inject constructor(
                 refreshActiveVolumeState()
             }
         }
+        bootstrapPhoneStateSync()
+    }
+
+    private fun bootstrapPhoneStateSync() {
+        viewModelScope.launch {
+            if (isWatchOutputSelected.value) return@launch
+            repeat(PHONE_SYNC_BOOTSTRAP_ATTEMPTS) {
+                playbackController.requestPhoneVolumeState()
+                if (hasRemotePhoneState()) {
+                    return@launch
+                }
+                delay(PHONE_SYNC_BOOTSTRAP_RETRY_DELAY_MS)
+            }
+        }
+    }
+
+    private fun hasRemotePhoneState(): Boolean {
+        val state = stateRepository.playerState.value
+        return state.songId.isNotBlank() ||
+            state.songTitle.isNotBlank() ||
+            state.artistName.isNotBlank() ||
+            state.isPlaying
     }
 
     fun selectOutput(target: WearOutputTarget) {

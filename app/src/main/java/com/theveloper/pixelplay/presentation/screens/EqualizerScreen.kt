@@ -228,7 +228,7 @@ fun EqualizerScreen(
     
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val minTopBarHeight = 64.dp + statusBarHeight
-    val maxTopBarHeight = 160.dp
+    val maxTopBarHeight = 180.dp
     
     val minTopBarHeightPx = with(density) { minTopBarHeight.toPx() }
     val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }
@@ -378,8 +378,8 @@ fun EqualizerScreen(
             collapseFraction = collapseFraction,
             headerHeight = currentTopBarHeightDp,
             onBackClick = { navController.popBackStack() },
-            expandedTitleStartPadding = 18.dp, // Matches original 18.dp
-            collapsedTitleStartPadding = 68.dp,
+            expandedTitleStartPadding = 20.dp,
+            collapsedTitleStartPadding = 72.dp,
             actions = {
                 // View Mode Toggle
                 FilledIconButton(

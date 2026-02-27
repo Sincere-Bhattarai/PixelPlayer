@@ -403,6 +403,7 @@ internal fun UnifiedPlayerSaveQueueLayer(
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 internal fun UnifiedPlayerCastLayer(
     showCastSheet: Boolean,

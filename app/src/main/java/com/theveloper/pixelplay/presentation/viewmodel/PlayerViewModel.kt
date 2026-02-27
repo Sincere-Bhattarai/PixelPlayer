@@ -2537,7 +2537,7 @@ class PlayerViewModel @Inject constructor(
 
             // Pre-resolve the starting song's cloud URI before ExoPlayer touches it.
             // This populates the resolvedUriCache so resolveDataSpec finds it instantly.
-            val startingUri = effectiveStartSong.contentUriString.toUri()
+            val startingUri = MediaItemBuilder.playbackUri(effectiveStartSong.contentUriString)
             if (startingUri.scheme == "telegram" || startingUri.scheme == "netease") {
                 dualPlayerEngine.resolveCloudUri(startingUri)
             }
@@ -2561,7 +2561,7 @@ class PlayerViewModel @Inject constructor(
                     val metadata = metadataBuilder.build()
                     MediaItem.Builder()
                         .setMediaId(song.id)
-                        .setUri(song.contentUriString.toUri())
+                        .setUri(MediaItemBuilder.playbackUri(song.contentUriString))
                         .setMediaMetadata(metadata)
                         .build()
                 }
@@ -2611,7 +2611,7 @@ class PlayerViewModel @Inject constructor(
 
         val mediaItem = MediaItem.Builder()
             .setMediaId(song.id)
-            .setUri(song.contentUriString.toUri())
+            .setUri(MediaItemBuilder.playbackUri(song.contentUriString))
             .setMediaMetadata(MediaItemBuilder.build(song).mediaMetadata)
             .build()
         if (controller.currentMediaItem?.mediaId == song.id) {
@@ -2696,7 +2696,7 @@ class PlayerViewModel @Inject constructor(
         mediaController?.let { controller ->
             val mediaItem = MediaItem.Builder()
                 .setMediaId(song.id)
-                .setUri(song.contentUriString.toUri())
+                .setUri(MediaItemBuilder.playbackUri(song.contentUriString))
                 .setMediaMetadata(MediaMetadata.Builder()
                     .setTitle(song.title)
                     .setArtist(song.displayArtist)
@@ -2712,7 +2712,7 @@ class PlayerViewModel @Inject constructor(
         mediaController?.let { controller ->
             val mediaItem = MediaItem.Builder()
                 .setMediaId(song.id)
-                .setUri(song.contentUriString.toUri())
+                .setUri(MediaItemBuilder.playbackUri(song.contentUriString))
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(song.title)

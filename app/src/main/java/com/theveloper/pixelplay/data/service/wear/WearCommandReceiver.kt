@@ -12,6 +12,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.core.net.toUri
+import com.google.android.gms.cast.MediaStatus
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
@@ -26,6 +29,7 @@ import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.data.service.MusicService
 import com.theveloper.pixelplay.data.service.MusicNotificationProvider
+import com.theveloper.pixelplay.data.service.player.CastPlayer
 import com.theveloper.pixelplay.data.service.player.DualPlayerEngine
 import com.theveloper.pixelplay.shared.WearBrowseRequest
 import com.theveloper.pixelplay.shared.WearBrowseResponse
@@ -77,6 +81,8 @@ class WearCommandReceiver : WearableListenerService() {
     private val json = Json { ignoreUnknownKeys = true }
     private var mediaController: MediaController? = null
     private var mediaControllerFuture: ListenableFuture<MediaController>? = null
+    private var cachedCastPlayer: CastPlayer? = null
+    private var cachedCastSession: CastSession? = null
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -98,7 +104,12 @@ class WearCommandReceiver : WearableListenerService() {
     }
 
     override fun onMessageReceived(messageEvent: MessageEvent) {
-        Timber.tag(TAG).d("Received message on path: ${messageEvent.path}")
+        Timber.tag(TAG).d(
+            "Received message path=%s sourceNodeId=%s bytes=%d",
+            messageEvent.path,
+            messageEvent.sourceNodeId,
+            messageEvent.data.size
+        )
 
         when (messageEvent.path) {
             WearDataPaths.PLAYBACK_COMMAND -> handlePlaybackCommand(messageEvent)
@@ -132,7 +143,11 @@ class WearCommandReceiver : WearableListenerService() {
                 handleInsertIntoQueue(command, playNext = false)
             }
             WearPlaybackCommand.PLAY_QUEUE_INDEX -> {
-                handlePlayQueueIndex(command)
+                runOnMainThread {
+                    if (!handlePlaybackCommandViaCast(command)) {
+                        handlePlayQueueIndex(command)
+                    }
+                }
             }
             WearPlaybackCommand.SET_SLEEP_TIMER_DURATION,
             WearPlaybackCommand.SET_SLEEP_TIMER_END_OF_TRACK,
@@ -140,56 +155,164 @@ class WearCommandReceiver : WearableListenerService() {
                 handleSleepTimerCommand(command)
             }
             else -> {
-                getOrBuildMediaController { controller ->
-                    when (command.action) {
-                        WearPlaybackCommand.PLAY -> controller.play()
-                        WearPlaybackCommand.PAUSE -> controller.pause()
-                        WearPlaybackCommand.TOGGLE_PLAY_PAUSE -> {
-                            if (controller.isPlaying) controller.pause() else controller.play()
-                        }
-                        WearPlaybackCommand.NEXT -> controller.seekToNext()
-                        WearPlaybackCommand.PREVIOUS -> controller.seekToPrevious()
-                        WearPlaybackCommand.TOGGLE_SHUFFLE -> {
-                            controller.sendCustomCommand(
-                                SessionCommand(
-                                    MusicNotificationProvider.CUSTOM_COMMAND_TOGGLE_SHUFFLE,
-                                    Bundle.EMPTY
-                                ),
-                                Bundle.EMPTY
-                            )
-                        }
-                        WearPlaybackCommand.CYCLE_REPEAT -> {
-                            controller.sendCustomCommand(
-                                SessionCommand(
-                                    MusicNotificationProvider.CUSTOM_COMMAND_CYCLE_REPEAT_MODE,
-                                    Bundle.EMPTY
-                                ),
-                                Bundle.EMPTY
-                            )
-                        }
-                        WearPlaybackCommand.TOGGLE_FAVORITE -> {
-                            val targetEnabled = command.targetEnabled
-                            if (targetEnabled == null) {
-                                val sessionCommand = SessionCommand(
-                                    MusicNotificationProvider.CUSTOM_COMMAND_LIKE,
-                                    Bundle.EMPTY
-                                )
-                                controller.sendCustomCommand(sessionCommand, Bundle.EMPTY)
-                            } else {
-                                val args = Bundle().apply {
-                                    putBoolean(MusicNotificationProvider.EXTRA_FAVORITE_ENABLED, targetEnabled)
-                                }
-                                val sessionCommand = SessionCommand(
-                                    MusicNotificationProvider.CUSTOM_COMMAND_SET_FAVORITE_STATE,
-                                    Bundle.EMPTY
-                                )
-                                controller.sendCustomCommand(sessionCommand, args)
+                runOnMainThread {
+                    if (handlePlaybackCommandViaCast(command)) {
+                        return@runOnMainThread
+                    }
+                    getOrBuildMediaController { controller ->
+                        when (command.action) {
+                            WearPlaybackCommand.PLAY -> controller.play()
+                            WearPlaybackCommand.PAUSE -> controller.pause()
+                            WearPlaybackCommand.TOGGLE_PLAY_PAUSE -> {
+                                if (controller.isPlaying) controller.pause() else controller.play()
                             }
+                            WearPlaybackCommand.NEXT -> controller.seekToNext()
+                            WearPlaybackCommand.PREVIOUS -> controller.seekToPrevious()
+                            WearPlaybackCommand.TOGGLE_SHUFFLE -> {
+                                controller.sendCustomCommand(
+                                    SessionCommand(
+                                        MusicNotificationProvider.CUSTOM_COMMAND_TOGGLE_SHUFFLE,
+                                        Bundle.EMPTY
+                                    ),
+                                    Bundle.EMPTY
+                                )
+                            }
+                            WearPlaybackCommand.CYCLE_REPEAT -> {
+                                controller.sendCustomCommand(
+                                    SessionCommand(
+                                        MusicNotificationProvider.CUSTOM_COMMAND_CYCLE_REPEAT_MODE,
+                                        Bundle.EMPTY
+                                    ),
+                                    Bundle.EMPTY
+                                )
+                            }
+                            WearPlaybackCommand.TOGGLE_FAVORITE -> {
+                                val targetEnabled = command.targetEnabled
+                                if (targetEnabled == null) {
+                                    val sessionCommand = SessionCommand(
+                                        MusicNotificationProvider.CUSTOM_COMMAND_LIKE,
+                                        Bundle.EMPTY
+                                    )
+                                    controller.sendCustomCommand(sessionCommand, Bundle.EMPTY)
+                                } else {
+                                    val args = Bundle().apply {
+                                        putBoolean(MusicNotificationProvider.EXTRA_FAVORITE_ENABLED, targetEnabled)
+                                    }
+                                    val sessionCommand = SessionCommand(
+                                        MusicNotificationProvider.CUSTOM_COMMAND_SET_FAVORITE_STATE,
+                                        Bundle.EMPTY
+                                    )
+                                    controller.sendCustomCommand(sessionCommand, args)
+                                }
+                            }
+                            else -> Timber.tag(TAG).w("Unknown playback action: ${command.action}")
                         }
-                        else -> Timber.tag(TAG).w("Unknown playback action: ${command.action}")
                     }
                 }
             }
+        }
+    }
+
+    private fun handlePlaybackCommandViaCast(command: WearPlaybackCommand): Boolean {
+        val castSession = resolveActiveCastSession() ?: return false
+        val remoteClient = castSession.remoteMediaClient ?: return false
+        val remotePlayerState = remoteClient.playerState
+        val hasRemotePlaybackState =
+            remoteClient.mediaStatus != null &&
+                remotePlayerState != MediaStatus.PLAYER_STATE_IDLE &&
+                remotePlayerState != MediaStatus.PLAYER_STATE_UNKNOWN
+        if (!hasRemotePlaybackState) {
+            return false
+        }
+
+        val castPlayer = getOrCreateCastPlayer(castSession)
+        val handled = when (command.action) {
+            WearPlaybackCommand.PLAY -> {
+                castPlayer.play()
+                true
+            }
+
+            WearPlaybackCommand.PAUSE -> {
+                castPlayer.pause()
+                true
+            }
+
+            WearPlaybackCommand.TOGGLE_PLAY_PAUSE -> {
+                if (remoteClient.isPlaying) castPlayer.pause() else castPlayer.play()
+                true
+            }
+
+            WearPlaybackCommand.NEXT -> {
+                castPlayer.next()
+                true
+            }
+
+            WearPlaybackCommand.PREVIOUS -> {
+                castPlayer.previous()
+                true
+            }
+
+            WearPlaybackCommand.CYCLE_REPEAT -> {
+                val currentRepeatMode = remoteClient.mediaStatus?.queueRepeatMode ?: MediaStatus.REPEAT_MODE_REPEAT_OFF
+                val nextRepeatMode = when (currentRepeatMode) {
+                    MediaStatus.REPEAT_MODE_REPEAT_OFF -> MediaStatus.REPEAT_MODE_REPEAT_ALL
+                    MediaStatus.REPEAT_MODE_REPEAT_ALL -> MediaStatus.REPEAT_MODE_REPEAT_SINGLE
+                    MediaStatus.REPEAT_MODE_REPEAT_SINGLE -> MediaStatus.REPEAT_MODE_REPEAT_OFF
+                    MediaStatus.REPEAT_MODE_REPEAT_ALL_AND_SHUFFLE -> MediaStatus.REPEAT_MODE_REPEAT_OFF
+                    else -> MediaStatus.REPEAT_MODE_REPEAT_OFF
+                }
+                castPlayer.setRepeatMode(nextRepeatMode)
+                true
+            }
+
+            WearPlaybackCommand.PLAY_QUEUE_INDEX -> {
+                val requestedIndex = command.queueIndex
+                if (requestedIndex == null || requestedIndex < 0) {
+                    Timber.tag(TAG).w("PLAY_QUEUE_INDEX missing/invalid index for cast: ${command.queueIndex}")
+                } else {
+                    val queueItems = remoteClient.mediaStatus?.queueItems.orEmpty()
+                    val queueItem = queueItems.getOrNull(requestedIndex)
+                    if (queueItem != null) {
+                        castPlayer.jumpToItem(queueItem.itemId, 0L)
+                    } else {
+                        Timber.tag(TAG).w(
+                            "PLAY_QUEUE_INDEX out of bounds for cast: index=%d count=%d",
+                            requestedIndex,
+                            queueItems.size
+                        )
+                    }
+                }
+                true
+            }
+
+            else -> false
+        }
+
+        if (handled) {
+            Timber.tag(TAG).d("Handled wear command via cast: ${command.action}")
+        }
+        return handled
+    }
+
+    private fun resolveActiveCastSession(): CastSession? {
+        return try {
+            CastContext.getSharedInstance(this).sessionManager.currentCastSession
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to get active Cast session")
+            null
+        }
+    }
+
+    private fun getOrCreateCastPlayer(session: CastSession): CastPlayer {
+        val existingPlayer = cachedCastPlayer
+        if (existingPlayer != null && cachedCastSession === session) {
+            return existingPlayer
+        }
+
+        cachedCastPlayer?.release()
+        return CastPlayer(session, contentResolver).also { createdPlayer ->
+            cachedCastPlayer = createdPlayer
+            cachedCastSession = session
         }
     }
 
@@ -1369,9 +1492,18 @@ class WearCommandReceiver : WearableListenerService() {
         }
     }
 
+    private fun releaseCastPlayer() {
+        cachedCastPlayer?.release()
+        cachedCastPlayer = null
+        cachedCastSession = null
+    }
+
     override fun onDestroy() {
         scope.cancel()
-        runOnMainThread { releaseController() }
+        runOnMainThread {
+            releaseController()
+            releaseCastPlayer()
+        }
         super.onDestroy()
     }
 }

@@ -79,6 +79,7 @@ class WearDataListenerService : WearableListenerService() {
             if (event.type != DataEvent.TYPE_CHANGED) return@forEach
 
             val dataItem = event.dataItem
+            Timber.tag(TAG).d("Data event path=%s", dataItem.uri.path)
             if (dataItem.uri.path == WearDataPaths.PLAYER_STATE) {
                 // Copy DataMap in callback thread; DataEventBuffer is invalid once callback returns.
                 val dataMap = DataMapItem.fromDataItem(dataItem).dataMap
@@ -184,6 +185,12 @@ class WearDataListenerService : WearableListenerService() {
      * Receives message responses from the phone (browse responses, transfer metadata/progress).
      */
     override fun onMessageReceived(messageEvent: MessageEvent) {
+        Timber.tag(TAG).d(
+            "Message received path=%s nodeId=%s bytes=%d",
+            messageEvent.path,
+            messageEvent.sourceNodeId,
+            messageEvent.data.size
+        )
         when (messageEvent.path) {
             WearDataPaths.BROWSE_RESPONSE -> {
                 try {

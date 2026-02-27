@@ -71,6 +71,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -91,6 +92,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.foundation.shape.CircleShape
@@ -1620,9 +1623,24 @@ private fun EfficientSlider(
     isPlaying: Boolean,
     trackEdgePadding: Dp
 ) {
+    val haptics = LocalHapticFeedback.current
+    val currentOnValueChange = rememberUpdatedState(onValueChange)
+    val currentHaptics = rememberUpdatedState(haptics)
+    val lastHapticStep = remember { intArrayOf(-1) }
+    val onValueChangeWithHaptics = remember {
+        { newValue: Float ->
+            val quantized = (newValue.coerceIn(0f, 1f) * 20f).toInt()
+            if (quantized != lastHapticStep[0]) {
+                lastHapticStep[0] = quantized
+                currentHaptics.value.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+            currentOnValueChange.value(newValue)
+        }
+    }
+
     WavySliderExpressive(
         value = valueState.value,
-        onValueChange = onValueChange,
+        onValueChange = onValueChangeWithHaptics,
         onValueChangeFinished = onValueChangeFinished,
         interactionSource = interactionSource,
         activeTrackColor = activeTrackColor,
