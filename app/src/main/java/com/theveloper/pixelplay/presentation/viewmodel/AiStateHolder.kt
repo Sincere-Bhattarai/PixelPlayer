@@ -155,11 +155,7 @@ class AiStateHolder @Inject constructor(
                         _aiError.value = context.getString(R.string.ai_no_songs_found)
                     }
                 }.onFailure { error ->
-                    _aiError.value = if (error.message?.contains("API Key") == true) {
-                        context.getString(R.string.ai_error_api_key)
-                    } else {
-                        context.getString(R.string.ai_error_generic, error.message ?: "")
-                    }
+                    _aiError.value = resolveAiErrorMessage(error)
                 }
             } finally {
                 _isGeneratingAiPlaylist.value = false
@@ -209,8 +205,9 @@ class AiStateHolder @Inject constructor(
                         toastEmitter?.invoke(context.getString(R.string.ai_no_songs_for_mix))
                     }
                 }.onFailure { error ->
-                    _aiError.value = error.message
-                    toastEmitter?.invoke(context.getString(R.string.could_not_update, error.message ?: ""))
+                    val detail = extractAiErrorDetail(error)
+                    _aiError.value = resolveAiErrorMessage(error)
+                    toastEmitter?.invoke(context.getString(R.string.could_not_update, detail))
                 }
             } finally {
                 _isGeneratingAiPlaylist.value = false
@@ -234,6 +231,24 @@ class AiStateHolder @Inject constructor(
         toastEmitter = null
         playSongsCallback = null
         openPlayerSheetCallback = null
+    }
+
+    private fun resolveAiErrorMessage(error: Throwable): String {
+        val detail = extractAiErrorDetail(error)
+        return if (detail.contains("api key", ignoreCase = true)) {
+            context.getString(R.string.ai_error_api_key)
+        } else {
+            context.getString(R.string.ai_error_generic, detail)
+        }
+    }
+
+    private fun extractAiErrorDetail(error: Throwable): String {
+        return listOf(error.message.orEmpty(), error.cause?.message.orEmpty())
+            .map { raw ->
+                raw.replace(Regex("^AI\\s*Error:\\s*", RegexOption.IGNORE_CASE), "").trim()
+            }
+            .firstOrNull { it.isNotBlank() }
+            ?: "Unknown error"
     }
 
     private fun resolveAiPlaylistName(

@@ -4,7 +4,9 @@ import com.google.genai.Client
 import com.theveloper.pixelplay.data.DailyMixManager
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import kotlin.math.max
@@ -14,6 +16,10 @@ class AiPlaylistGenerator @Inject constructor(
     private val dailyMixManager: DailyMixManager,
     private val json: Json
 ) {
+    companion object {
+        private const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+    }
+
     private val promptCache: MutableMap<String, List<String>> = object : LinkedHashMap<String, List<String>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean = size > 20
     }
@@ -41,7 +47,7 @@ class AiPlaylistGenerator @Inject constructor(
             }
 
             val selectedModel = userPreferencesRepository.geminiModel.first()
-            val modelName = selectedModel.ifEmpty { "" }
+            val modelName = selectedModel.ifBlank { DEFAULT_GEMINI_MODEL }
 
             val client = Client.builder().apiKey(apiKey).build()
 
@@ -110,7 +116,9 @@ class AiPlaylistGenerator @Inject constructor(
             ]
             """.trimIndent()
 
-            val response = client.models.generateContent(modelName, fullPrompt, null)
+            val response = withContext(Dispatchers.IO) {
+                client.models.generateContent(modelName, fullPrompt, null)
+            }
             val responseText = response.text()
                 ?: return Result.failure(Exception("AI returned an empty response."))
 
@@ -129,7 +137,11 @@ class AiPlaylistGenerator @Inject constructor(
         } catch (e: IllegalArgumentException) {
             Result.failure(Exception(e.message ?: "AI response did not contain a valid playlist."))
         } catch (e: Exception) {
-            Result.failure(Exception("AI Error: ${e.message}"))
+            val errorDetails = e.message?.takeIf { it.isNotBlank() }
+                ?: e.cause?.message?.takeIf { it.isNotBlank() }
+                ?: e::class.simpleName
+                ?: "Unknown error"
+            Result.failure(Exception("AI Error: $errorDetails", e))
         }
     }
 
