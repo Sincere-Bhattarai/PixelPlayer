@@ -3,7 +3,7 @@ name: PixelPlay Build Pipeline
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Allows you to run it manually
+  workflow_dispatch:
 
 jobs:
   build:
@@ -19,13 +19,15 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      - name: Grant Execute Permission
+        run: chmod +x gradlew
+
       - name: Decode Keystore
         run: echo "${{ secrets.SIGNING_KEY }}" | base64 -d > app/voidplay.jks
 
       - name: Build & Sign APK
-        run: ./gradlew assembleRelease
+        run: ./gradlew :app:assembleRelease
         env:
-          # These map the GitHub Secrets to system variables for Gradle
           VOID_STORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
           VOID_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
           VOID_ALIAS: ${{ secrets.ALIAS }}
@@ -33,5 +35,6 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PixelPlay-6.0.5-Alpha
-          path: app/build/outputs/apk/release/*.apk
+          name: VoidPlay-6.0.5-Alpha
+          # Fixed the path to be more specific to avoid wildcard errors
+          path: app/build/outputs/apk/release/app-release.apk
