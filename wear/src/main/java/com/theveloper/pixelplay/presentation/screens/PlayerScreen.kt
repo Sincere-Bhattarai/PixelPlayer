@@ -940,8 +940,13 @@ private fun HeaderBlock(
 
         Text(
             text = when {
-                isWatchOutputSelected && state.artistName.isNotEmpty() -> state.artistName
-                isWatchOutputSelected -> "On watch"
+                isWatchOutputSelected -> {
+                    val artistAlbum = buildList {
+                        if (state.artistName.isNotBlank()) add(state.artistName)
+                        if (state.albumName.isNotBlank()) add(state.albumName)
+                    }.joinToString(" · ")
+                    if (artistAlbum.isNotBlank()) artistAlbum else "On watch"
+                }
                 !isPhoneConnected -> "No phone"
                 state.artistName.isNotEmpty() -> state.artistName
                 state.isEmpty -> "Waiting playback"
