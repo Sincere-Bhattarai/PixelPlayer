@@ -800,7 +800,7 @@ fun SettingsCategoryScreen(
                             SettingsSubsection(title = "AI Provider") {
                                 ThemeSelectorItem(
                                     label = "Provider",
-                                    description = "Choose your AI provider",
+                                    description = "Select which AI service to use for playlist generation and metadata",
                                     options = mapOf(
                                         "GEMINI" to "Google Gemini",
                                         "DEEPSEEK" to "DeepSeek"
@@ -819,7 +819,7 @@ fun SettingsCategoryScreen(
                                             apiKey = geminiApiKey,
                                             onApiKeySave = { settingsViewModel.onGeminiApiKeyChange(it) },
                                             title = "Gemini API Key",
-                                            subtitle = "Needed for AI-powered features."
+                                            subtitle = "Get from Google AI Studio (aistudio.google.com)"
                                         )
                                     }
                                     "DEEPSEEK" -> {
@@ -827,7 +827,7 @@ fun SettingsCategoryScreen(
                                             apiKey = deepseekApiKey,
                                             onApiKeySave = { settingsViewModel.onDeepseekApiKeyChange(it) },
                                             title = "DeepSeek API Key",
-                                            subtitle = "Needed for AI-powered features."
+                                            subtitle = "Get from DeepSeek Platform (api.deepseek.com)"
                                         )
                                     }
                                 }
