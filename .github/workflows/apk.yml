@@ -1,0 +1,66 @@
+name: PixelPlay Build Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Execute Permission
+        run: chmod +x gradlew
+
+      # This specifically builds ONLY the :app module (Phone version)
+      - name: Build Release Artifacts
+        run: ./gradlew :app:bundleRelease :app:assembleRelease
+        env:
+          VOID_STORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
+          VOID_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+          VOID_ALIAS: ${{ secrets.ALIAS }}
+
+      # Signing the App Bundle (AAB) for Play Store
+      - name: Sign App Bundle
+        id: sign_aab
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: app/build/outputs/bundle/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      # Signing the APK for Direct Install
+      - name: Sign APK
+        id: sign_apk
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload PixelPlay APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixelPlay-6.0.5-APK
+          path: ${{ steps.sign_apk.outputs.signedReleaseFile }}
+
+      - name: Upload PixelPlay Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixelPlay-6.0.5-Bundle
+          path: ${{ steps.sign_aab.outputs.signedReleaseFile }}
+          
