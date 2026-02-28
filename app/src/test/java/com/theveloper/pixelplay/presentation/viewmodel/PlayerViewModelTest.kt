@@ -81,6 +81,7 @@ class PlayerViewModelTest {
     private val mockExternalMediaStateHolder: ExternalMediaStateHolder = mockk(relaxed = true)
     private val mockThemeStateHolder: ThemeStateHolder = mockk(relaxed = true)
     private val mockMultiSelectionStateHolder: MultiSelectionStateHolder = mockk(relaxed = true)
+    private val mockPlaylistSelectionStateHolder: PlaylistSelectionStateHolder = mockk(relaxed = true)
     private lateinit var mockMediaControllerFactory: com.theveloper.pixelplay.data.media.MediaControllerFactory
 
     private val testDispatcher = StandardTestDispatcher()
@@ -218,6 +219,7 @@ class PlayerViewModelTest {
             mockExternalMediaStateHolder,
             mockThemeStateHolder,
             mockMultiSelectionStateHolder,
+            mockPlaylistSelectionStateHolder,
             sessionToken,
             mockMediaControllerFactory
         )
