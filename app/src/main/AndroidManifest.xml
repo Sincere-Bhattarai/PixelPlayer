@@ -194,7 +194,7 @@
         </provider>
 
         <receiver android:name=".ui.glancewidget.WidgetUpdateReceiver" android:exported="true"> <intent-filter>
-            <action android:name="com.example.pixelplay.ACTION_WIDGET_UPDATE_PLAYBACK_STATE" />
+            <action android:name="com.theveloper.pixelplay.ACTION_WIDGET_UPDATE_PLAYBACK_STATE" />
         </intent-filter>
         </receiver>
 
@@ -223,9 +223,6 @@
         <service
             android:name=".data.service.wear.WearCommandReceiver"
             android:exported="true">
-            <intent-filter>
-                <action android:name="com.google.android.gms.wearable.BIND_LISTENER" />
-            </intent-filter>
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.BIND_LISTENER" />
                 <data

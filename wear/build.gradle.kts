@@ -52,7 +52,6 @@ android {
         )
     }
 
-    // --- ADD THIS BLOCK TO FIX THE BUILD ERROR ---
     lint {
         // Disables the specific "WearableBindListener" check causing the crash
         disable += "WearableBindListener"

@@ -77,11 +77,11 @@ android {
         // Aquí es donde debes agregar freeCompilerArgs para los informes del compilador de Compose.
         freeCompilerArgs += listOf(
             "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=${project.buildDir.absolutePath}/compose_compiler_reports"
+            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=${layout.buildDirectory.get().asFile.absolutePath}/compose_compiler_reports"
         )
         freeCompilerArgs += listOf(
             "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=${project.buildDir.absolutePath}/compose_compiler_metrics"
+            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=${layout.buildDirectory.get().asFile.absolutePath}/compose_compiler_metrics"
         )
 
         //Stability
