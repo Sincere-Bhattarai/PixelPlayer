@@ -20,6 +20,7 @@ import javax.inject.Singleton
 class WearPhoneTransferSender @Inject constructor(
     private val application: Application,
     private val transferStateStore: PhoneWatchTransferStateStore,
+    private val transferCancellationStore: PhoneWatchTransferCancellationStore,
 ) {
     private val capabilityClient by lazy { Wearable.getCapabilityClient(application) }
     private val messageClient: MessageClient by lazy { Wearable.getMessageClient(application) }
@@ -106,6 +107,57 @@ class WearPhoneTransferSender @Inject constructor(
                     songTitle = songTitle,
                 )
             }
+        }
+    }
+
+    suspend fun cancelTransfer(requestId: String) {
+        val transfer = transferStateStore.transfers.value[requestId]
+        if (transfer == null) {
+            Timber.tag(TAG).w("Ignoring cancel for unknown transfer requestId=%s", requestId)
+            return
+        }
+
+        transferCancellationStore.markCancelled(requestId)
+        transferStateStore.markCancelled(requestId)
+
+        runCatching {
+            val capability = capabilityClient.getCapability(
+                WearCapabilities.PIXELPLAY_WEAR_APP,
+                CapabilityClient.FILTER_REACHABLE,
+            ).await()
+
+            val nodes = capability.nodes
+            transferStateStore.retainReachableWatchNodes(nodes.map { it.id }.toSet())
+            if (nodes.isEmpty()) return@runCatching
+
+            val request = WearTransferRequest(
+                requestId = requestId,
+                songId = transfer.songId,
+            )
+            val payload = json.encodeToString(request).toByteArray(Charsets.UTF_8)
+            val cancelledProgressPayload = json.encodeToString(
+                WearTransferProgress(
+                    requestId = requestId,
+                    songId = transfer.songId,
+                    bytesTransferred = transfer.bytesTransferred,
+                    totalBytes = transfer.totalBytes,
+                    status = WearTransferProgress.STATUS_CANCELLED,
+                )
+            ).toByteArray(Charsets.UTF_8)
+            nodes.forEach { node ->
+                messageClient.sendMessage(
+                    node.id,
+                    WearDataPaths.TRANSFER_PROGRESS,
+                    cancelledProgressPayload,
+                ).await()
+                messageClient.sendMessage(
+                    node.id,
+                    WearDataPaths.TRANSFER_CANCEL,
+                    payload,
+                ).await()
+            }
+        }.onFailure { error ->
+            Timber.tag(TAG).w(error, "Failed to notify watch about cancelled transfer")
         }
     }
 

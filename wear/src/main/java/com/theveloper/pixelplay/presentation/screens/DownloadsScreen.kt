@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,6 +51,7 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import com.google.android.horologist.compose.layout.ScalingLazyColumn
 import com.google.android.horologist.compose.layout.rememberResponsiveColumnState
+import com.theveloper.pixelplay.data.TransferState
 import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionIndicator
 import com.theveloper.pixelplay.presentation.components.PlayingEqIcon
 import com.theveloper.pixelplay.presentation.components.WearTopTimeText
@@ -99,6 +101,7 @@ fun DownloadsScreen(
     }
     var selectedLocalSongForMenu by remember { mutableStateOf<LocalSongEntity?>(null) }
     var selectedLocalSongForDeleteConfirmation by remember { mutableStateOf<LocalSongEntity?>(null) }
+    var selectedTransferForCancelConfirmation by remember { mutableStateOf<TransferState?>(null) }
     var inlineMessage by remember { mutableStateOf<String?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -125,6 +128,13 @@ fun DownloadsScreen(
         delay(4_000L)
         if (inlineMessage == message) {
             inlineMessage = null
+        }
+    }
+    LaunchedEffect(activeTransfers, selectedTransferForCancelConfirmation?.requestId) {
+        val requestId = selectedTransferForCancelConfirmation?.requestId ?: return@LaunchedEffect
+        val transfer = activeTransfers[requestId]
+        if (transfer?.status != WearTransferProgress.STATUS_TRANSFERRING) {
+            selectedTransferForCancelConfirmation = null
         }
     }
     val transferringStates = activeTransfers.values
@@ -240,7 +250,7 @@ fun DownloadsScreen(
                                 strokeWidth = 2.dp,
                             )
                         },
-                        onClick = {},
+                        onClick = { selectedTransferForCancelConfirmation = transfer },
                         colors = ChipDefaults.chipColors(
                             backgroundColor = elevatedSurfaceContainer,
                             contentColor = palette.chipContent,
@@ -590,6 +600,18 @@ fun DownloadsScreen(
                 },
             )
         }
+
+        val confirmCancelTransfer = selectedTransferForCancelConfirmation
+        if (confirmCancelTransfer != null) {
+            ConfirmCancelTransferScreen(
+                transfer = confirmCancelTransfer,
+                onDismiss = { selectedTransferForCancelConfirmation = null },
+                onConfirm = {
+                    viewModel.cancelTransfer(confirmCancelTransfer.requestId)
+                    selectedTransferForCancelConfirmation = null
+                },
+            )
+        }
     }
 }
 
@@ -911,26 +933,122 @@ private fun ConfirmDeleteDownloadedSongScreen(
 }
 
 @Composable
+private fun ConfirmCancelTransferScreen(
+    transfer: TransferState,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val palette = LocalWearPalette.current
+    val columnState = rememberResponsiveColumnState()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(palette.screenBackgroundColor())
+            .zIndex(12f),
+    ) {
+        ScalingLazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            columnState = columnState,
+        ) {
+            item { Spacer(modifier = Modifier.height(18.dp)) }
+
+            item {
+                Text(
+                    text = "Cancel transfer?",
+                    style = MaterialTheme.typography.title3,
+                    color = palette.textPrimary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 2.dp),
+                )
+            }
+
+            item {
+                Text(
+                    text = transfer.songTitle.ifBlank { "Current transfer" },
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.body2,
+                    color = palette.textSecondary.copy(alpha = 0.86f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 2.dp),
+                )
+            }
+
+            item {
+                Text(
+                    text = "Any partial copy on this watch will be discarded.",
+                    style = MaterialTheme.typography.caption2,
+                    color = palette.textSecondary.copy(alpha = 0.78f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                )
+            }
+
+            item {
+                DownloadsActionChip(
+                    icon = Icons.Rounded.Close,
+                    label = "Yes, cancel",
+                    backgroundColor = MaterialTheme.colors.error,
+                    contentColor = MaterialTheme.colors.onError,
+                    onClick = onConfirm,
+                )
+            }
+
+            item {
+                DownloadsActionChip(
+                    icon = Icons.Rounded.PlayArrow,
+                    label = "Keep sending",
+                    backgroundColor = palette.surfaceContainerColor(),
+                    onClick = onDismiss,
+                )
+            }
+        }
+
+        AlwaysOnScalingPositionIndicator(
+            listState = columnState.state,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            color = palette.textPrimary,
+        )
+
+        WearTopTimeText(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .zIndex(5f),
+            color = palette.textPrimary,
+        )
+    }
+}
+
+@Composable
 private fun DownloadsActionChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     backgroundColor: androidx.compose.ui.graphics.Color,
+    contentColor: Color = LocalWearPalette.current.textPrimary,
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val palette = LocalWearPalette.current
+    val disabledContentColor = palette.textSecondary.copy(alpha = 0.72f)
     Chip(
         label = {
             Text(
                 text = label,
-                color = if (enabled) palette.textPrimary else palette.textSecondary.copy(alpha = 0.72f),
+                color = if (enabled) contentColor else disabledContentColor,
             )
         },
         icon = {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (enabled) palette.textPrimary else palette.textSecondary.copy(alpha = 0.72f),
+                tint = if (enabled) contentColor else disabledContentColor,
                 modifier = Modifier.size(18.dp),
             )
         },

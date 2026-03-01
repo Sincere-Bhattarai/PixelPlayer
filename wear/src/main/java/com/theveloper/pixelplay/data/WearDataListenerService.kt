@@ -266,6 +266,19 @@ class WearDataListenerService : WearableListenerService() {
                 }
             }
 
+            WearDataPaths.TRANSFER_CANCEL -> {
+                try {
+                    val requestJson = String(messageEvent.data, Charsets.UTF_8)
+                    val request = json.decodeFromString<WearTransferRequest>(requestJson)
+                    transferRepository.cancelTransfer(
+                        requestId = request.requestId,
+                        notifyPhone = false,
+                    )
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to process transfer cancel")
+                }
+            }
+
             WearDataPaths.WATCH_LIBRARY_QUERY -> {
                 scope.launch {
                     transferRepository.publishLibraryState(targetNodeId = messageEvent.sourceNodeId)

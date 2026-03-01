@@ -115,6 +115,8 @@ class WearTransferRepository @Inject constructor(
     private val transferWatchdogs = ConcurrentHashMap<String, Job>()
     /** Request IDs currently receiving bytes through ChannelClient. */
     private val activeChannelRequestIds = ConcurrentHashMap.newKeySet<String>()
+    /** Cancelled request IDs retained briefly so late metadata/progress/channel events are ignored safely. */
+    private val cancelledRequestIds = ConcurrentHashMap.newKeySet<String>()
 
     companion object {
         private const val TAG = "WearTransferRepo"
@@ -124,6 +126,7 @@ class WearTransferRepository @Inject constructor(
         private const val METADATA_POLL_INTERVAL_MS = 120L
         private const val WATCHDOG_TOUCH_INTERVAL_MS = 1_500L
         private const val LOCAL_PROGRESS_UPDATE_INTERVAL_BYTES = 65_536L
+        private const val CANCELLED_REQUEST_RETENTION_MS = 300_000L
     }
 
     init {
@@ -203,6 +206,10 @@ class WearTransferRepository @Inject constructor(
      * Called when metadata arrives from the phone (before the audio channel opens).
      */
     fun onMetadataReceived(metadata: WearTransferMetadata) {
+        if (isTransferCancelled(metadata.requestId)) {
+            cleanupCancelledTransfer(metadata.requestId, metadata.songId)
+            return
+        }
         val errorMsg = metadata.error
         if (errorMsg != null) {
             Timber.tag(TAG).w("Transfer rejected by phone: $errorMsg")
@@ -236,6 +243,14 @@ class WearTransferRepository @Inject constructor(
      * Called when progress updates arrive from the phone during streaming.
      */
     fun onProgressReceived(progress: WearTransferProgress) {
+        if (progress.status == WearTransferProgress.STATUS_CANCELLED) {
+            rememberCancelledRequest(progress.requestId)
+            cleanupCancelledTransfer(progress.requestId, progress.songId)
+            return
+        }
+        if (isTransferCancelled(progress.requestId)) {
+            return
+        }
         val normalizedStatus = if (
             progress.status == WearTransferProgress.STATUS_COMPLETED &&
             activeChannelRequestIds.contains(progress.requestId)
@@ -280,10 +295,21 @@ class WearTransferRepository @Inject constructor(
      */
     suspend fun onChannelOpened(requestId: String, inputStream: InputStream) {
         activeChannelRequestIds.add(requestId)
+        if (isTransferCancelled(requestId)) {
+            inputStream.close()
+            cleanupCancelledTransfer(
+                requestId = requestId,
+                songId = _activeTransfers.value[requestId]?.songId,
+            )
+            activeChannelRequestIds.remove(requestId)
+            return
+        }
         val metadata = awaitMetadata(requestId)
         if (metadata == null) {
             val songId = _activeTransfers.value[requestId]?.songId
-            if (!songId.isNullOrBlank()) {
+            if (isTransferCancelled(requestId)) {
+                cleanupCancelledTransfer(requestId, songId)
+            } else if (!songId.isNullOrBlank()) {
                 handleTransferError(requestId, songId, "Transfer metadata missing")
             } else {
                 Timber.tag(TAG).w("No pending metadata for requestId=$requestId")
@@ -302,6 +328,11 @@ class WearTransferRepository @Inject constructor(
         val previousSong = localSongDao.getSongById(metadata.songId)
 
         try {
+            if (isTransferCancelled(requestId)) {
+                inputStream.close()
+                cleanupCancelledTransfer(requestId, metadata.songId)
+                return
+            }
             _activeTransfers.update { map ->
                 val current = map[requestId] ?: TransferState(
                     requestId = requestId,
@@ -320,11 +351,16 @@ class WearTransferRepository @Inject constructor(
             var totalReceived = 0L
             var lastProgressUpdateAtBytes = 0L
             var lastWatchdogTouchAt = SystemClock.elapsedRealtime()
+            var cancelledDuringStream = false
             armTransferWatchdog(requestId, metadata.songId)
             localFile.outputStream().use { fileOut ->
                 val buffer = ByteArray(8192)
                 var bytesRead: Int
                 while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                    if (isTransferCancelled(requestId)) {
+                        cancelledDuringStream = true
+                        break
+                    }
                     fileOut.write(buffer, 0, bytesRead)
                     totalReceived += bytesRead
 
@@ -348,6 +384,17 @@ class WearTransferRepository @Inject constructor(
                 }
             }
             inputStream.close()
+
+            if (cancelledDuringStream || isTransferCancelled(requestId)) {
+                if (localFile.exists() && !localFile.delete()) {
+                    Timber.tag(TAG).w(
+                        "Failed to delete partial cancelled transfer for requestId=%s",
+                        requestId,
+                    )
+                }
+                cleanupCancelledTransfer(requestId, metadata.songId)
+                return
+            }
 
             // Verify file size
             val actualSize = localFile.length()
@@ -437,29 +484,31 @@ class WearTransferRepository @Inject constructor(
     /**
      * Cancel an in-progress transfer.
      */
-    fun cancelTransfer(requestId: String) {
+    fun cancelTransfer(requestId: String, notifyPhone: Boolean = true) {
         scope.launch {
-            val state = _activeTransfers.value[requestId] ?: return@launch
+            val state = _activeTransfers.value[requestId]
+            val songId = state?.songId ?: pendingMetadata[requestId]?.songId
+            rememberCancelledRequest(requestId)
             try {
-                val cancelRequest = WearTransferRequest(requestId, state.songId)
-                val cancelBytes = json.encodeToString(cancelRequest).toByteArray(Charsets.UTF_8)
-                val nodes = nodeClient.connectedNodes.await()
-                nodes.forEach { node ->
-                    messageClient.sendMessage(
-                        node.id,
-                        WearDataPaths.TRANSFER_CANCEL,
-                        cancelBytes,
-                    ).await()
+                if (notifyPhone) {
+                    val cancelRequest = WearTransferRequest(
+                        requestId = requestId,
+                        songId = songId.orEmpty(),
+                    )
+                    val cancelBytes = json.encodeToString(cancelRequest).toByteArray(Charsets.UTF_8)
+                    val nodes = nodeClient.connectedNodes.await()
+                    nodes.forEach { node ->
+                        messageClient.sendMessage(
+                            node.id,
+                            WearDataPaths.TRANSFER_CANCEL,
+                            cancelBytes,
+                        ).await()
+                    }
                 }
             } catch (e: Exception) {
                 Timber.tag(TAG).w(e, "Failed to send cancel request")
             }
-            _activeTransfers.update { it - requestId }
-            songToRequestId.remove(state.songId)
-            pendingMetadata.remove(requestId)
-            pendingArtworkByRequestId.remove(requestId)
-            clearTransferWatchdog(requestId)
-            activeChannelRequestIds.remove(requestId)
+            cleanupCancelledTransfer(requestId, songId)
         }
     }
 
@@ -544,6 +593,29 @@ class WearTransferRepository @Inject constructor(
             clearTransferWatchdog(staleRequestId)
             activeChannelRequestIds.remove(staleRequestId)
         }
+    }
+
+    private fun isTransferCancelled(requestId: String): Boolean {
+        return cancelledRequestIds.contains(requestId)
+    }
+
+    private fun rememberCancelledRequest(requestId: String) {
+        cancelledRequestIds.add(requestId)
+        scope.launch {
+            delay(CANCELLED_REQUEST_RETENTION_MS)
+            cancelledRequestIds.remove(requestId)
+        }
+    }
+
+    private fun cleanupCancelledTransfer(requestId: String, songId: String?) {
+        _activeTransfers.update { it - requestId }
+        songId?.takeIf { it.isNotBlank() }?.let { safeSongId ->
+            songToRequestId.remove(safeSongId)
+        }
+        pendingMetadata.remove(requestId)
+        pendingArtworkByRequestId.remove(requestId)
+        clearTransferWatchdog(requestId)
+        activeChannelRequestIds.remove(requestId)
     }
 
     private fun handleTransferError(requestId: String, songId: String, message: String) {

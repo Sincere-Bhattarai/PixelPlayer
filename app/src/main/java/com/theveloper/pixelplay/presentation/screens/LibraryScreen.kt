@@ -215,6 +215,8 @@ import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import java.util.Locale
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.ui.focus.focusModifier
 import com.theveloper.pixelplay.data.model.PlaylistShapeType
 import kotlinx.coroutines.flow.first
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -236,7 +238,8 @@ private const val ENABLE_FOLDERS_STORAGE_FILTER = false
 @Composable
 private fun WatchTransferProgressDialog(
     transfer: PhoneWatchTransferState,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onCancelTransfer: () -> Unit,
 ) {
     val context = LocalContext.current
     val animatedProgress by animateFloatAsState(
@@ -286,18 +289,22 @@ private fun WatchTransferProgressDialog(
                     fontWeight = FontWeight.SemiBold
                 )
                 Box(
-                    modifier = Modifier.size(76.dp),
+                    modifier = Modifier
+                        .size(96.dp)
+                        .padding(vertical = 20.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     LoadingIndicator(
                         modifier = Modifier
                             .fillMaxSize()
-                            .scale(1.15f),
+                            .scale(1.84f),
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
                         text = "$progressPercent%",
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontSize = MaterialTheme.typography.labelLarge.fontSize * 1.4f
+                        ),
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
@@ -332,6 +339,16 @@ private fun WatchTransferProgressDialog(
                         color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center
                     )
+                }
+                Button(
+                    modifier = Modifier.padding(top = 4.dp),
+                    onClick = onCancelTransfer,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text(text = "Cancel transfer")
                 }
             }
         }
@@ -679,6 +696,8 @@ fun LibraryScreen(
     val currentTab = tabTitles.getOrNull(currentTabIndex)?.toLibraryTabIdOrNull() ?: currentTabId
     val currentTabTitle = currentTab.displayTitle()
 
+    val navigationPillScale = if (isSendingToWatch) 0.9f else 1.0f
+
     Scaffold(
         modifier = Modifier.background(brush = gradientBrush),
         topBar = {
@@ -686,6 +705,8 @@ fun LibraryScreen(
                 title = {
                     if (isCompactNavigation) {
                         LibraryNavigationPill(
+                            modifier = Modifier
+                                .scale(navigationPillScale),
                             title = currentTabTitle,
                             isExpanded = showTabSwitcherSheet,
                             iconRes = currentTab.iconRes(),
@@ -695,11 +716,6 @@ fun LibraryScreen(
                             },
                             onArrowClick = { showTabSwitcherSheet = true }
                         )
-//                        LibraryNavigationPill(
-//                            title = currentTabTitle,
-//                            animationDirection = pillAnimationDirection,
-//                            onClick = { showTabSwitcherSheet = true }
-//                        )
                     } else {
                         Text(
                             modifier = Modifier.padding(start = 8.dp),
@@ -719,8 +735,9 @@ fun LibraryScreen(
                         val watchTransferPercent = (watchTransferProgress * 100f).toInt().coerceIn(0, 100)
                         Surface(
                             modifier = Modifier
-                                .padding(end = 8.dp)
-                                .height(48.dp)
+                                .padding(end = 0.dp)
+                                .wrapContentWidth()
+                                .height(40.dp)
                                 .clip(CircleShape)
                                 .clickable(enabled = activeWatchTransfer != null) {
                                     showWatchTransferDialog = true
@@ -729,13 +746,20 @@ fun LibraryScreen(
                             color = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                         ) {
-                            Box(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 4.dp, end = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.rounded_watch_arrow_down_24),
+                                    contentDescription = "Watch transfer",
+                                    modifier = Modifier.size(20.dp)
+                                )
                                 Text(
                                     text = "$watchTransferPercent%",
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -1554,9 +1578,14 @@ fun LibraryScreen(
     )
 
     if (showWatchTransferDialog && activeWatchTransfer != null) {
+        val currentWatchTransfer = activeWatchTransfer!!
         WatchTransferProgressDialog(
-            transfer = activeWatchTransfer!!,
-            onDismiss = { showWatchTransferDialog = false }
+            transfer = currentWatchTransfer,
+            onDismiss = { showWatchTransferDialog = false },
+            onCancelTransfer = {
+                songInfoBottomSheetViewModel.cancelWatchTransfer(currentWatchTransfer.requestId)
+                showWatchTransferDialog = false
+            }
         )
     }
 
@@ -1862,6 +1891,7 @@ private fun CompactLibraryPagerIndicator(
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun LibraryNavigationPill(
+    modifier: Modifier = Modifier,
     title: String,
     isExpanded: Boolean,
     iconRes: Int,

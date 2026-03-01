@@ -89,6 +89,7 @@ class WearCommandReceiver : WearableListenerService() {
     @Inject lateinit var dualPlayerEngine: DualPlayerEngine
     @Inject lateinit var colorSchemeProcessor: ColorSchemeProcessor
     @Inject lateinit var transferStateStore: PhoneWatchTransferStateStore
+    @Inject lateinit var transferCancellationStore: PhoneWatchTransferCancellationStore
 
     private val json = Json { ignoreUnknownKeys = true }
     private var mediaController: MediaController? = null
@@ -97,9 +98,6 @@ class WearCommandReceiver : WearableListenerService() {
     private var cachedCastSession: CastSession? = null
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /** Set of requestIds that have been cancelled by the watch */
-    private val cancelledTransfers = ConcurrentHashMap.newKeySet<String>()
     private val albumPaletteSeedCache = ConcurrentHashMap<Long, Int>()
     private val albumArtworkTransferCache = ConcurrentHashMap<Long, ByteArray>()
 
@@ -1160,6 +1158,17 @@ class WearCommandReceiver : WearableListenerService() {
                 songTitle = song.title,
                 totalBytes = fileSize,
             )
+            if (transferCancellationStore.consumeCancellation(request.requestId)) {
+                sendTransferProgress(
+                    nodeId = messageEvent.sourceNodeId,
+                    requestId = request.requestId,
+                    songId = song.id,
+                    bytesTransferred = 0L,
+                    totalBytes = fileSize,
+                    status = WearTransferProgress.STATUS_CANCELLED,
+                )
+                return
+            }
             val metadataBytes = json.encodeToString(metadata).toByteArray(Charsets.UTF_8)
             val msgClient = Wearable.getMessageClient(this@WearCommandReceiver)
             msgClient.sendMessage(
@@ -1184,6 +1193,18 @@ class WearCommandReceiver : WearableListenerService() {
                 }
             }
 
+            if (transferCancellationStore.consumeCancellation(request.requestId)) {
+                sendTransferProgress(
+                    nodeId = messageEvent.sourceNodeId,
+                    requestId = request.requestId,
+                    songId = song.id,
+                    bytesTransferred = 0L,
+                    totalBytes = fileSize,
+                    status = WearTransferProgress.STATUS_CANCELLED,
+                )
+                return
+            }
+
             // 6. Stream audio via ChannelClient
             streamFileToWatch(
                 messageEvent.sourceNodeId, request.requestId, song.id,
@@ -1206,7 +1227,8 @@ class WearCommandReceiver : WearableListenerService() {
             Timber.tag(TAG).e(e, "Failed to parse transfer cancel")
             return
         }
-        cancelledTransfers.add(request.requestId)
+        transferCancellationStore.markCancelled(request.requestId)
+        transferStateStore.markCancelled(request.requestId)
         Timber.tag(TAG).d("Transfer cancelled: requestId=${request.requestId}")
     }
 
@@ -1490,6 +1512,17 @@ class WearCommandReceiver : WearableListenerService() {
         inputStream: InputStream,
         fileSize: Long,
     ) {
+        if (transferCancellationStore.consumeCancellation(requestId)) {
+            sendTransferProgress(
+                nodeId = nodeId,
+                requestId = requestId,
+                songId = songId,
+                bytesTransferred = 0L,
+                totalBytes = fileSize,
+                status = WearTransferProgress.STATUS_CANCELLED,
+            )
+            return
+        }
         val channelClient = Wearable.getChannelClient(this@WearCommandReceiver)
         val channel = channelClient.openChannel(nodeId, WearDataPaths.TRANSFER_CHANNEL).await()
 
@@ -1511,7 +1544,7 @@ class WearCommandReceiver : WearableListenerService() {
                 var bytesRead: Int
                 while (input.read(buffer).also { bytesRead = it } != -1) {
                     // Check for cancellation
-                    if (cancelledTransfers.remove(requestId)) {
+                    if (transferCancellationStore.consumeCancellation(requestId)) {
                         Timber.tag(TAG).d("Transfer cancelled during streaming: $requestId")
                         sendTransferProgress(
                             nodeId, requestId, songId, totalSent, fileSize,
@@ -1556,6 +1589,7 @@ class WearCommandReceiver : WearableListenerService() {
             } catch (e: Exception) {
                 Timber.tag(TAG).w(e, "Failed to close channel")
             }
+            transferCancellationStore.clear(requestId)
         }
     }
 

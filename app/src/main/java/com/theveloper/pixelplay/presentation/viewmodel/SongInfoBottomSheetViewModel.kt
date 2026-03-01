@@ -107,4 +107,11 @@ class SongInfoBottomSheetViewModel @Inject constructor(
             }
         }
     }
+
+    fun cancelWatchTransfer(requestId: String) {
+        if (requestId.isBlank()) return
+        viewModelScope.launch {
+            wearPhoneTransferSender.cancelTransfer(requestId)
+        }
+    }
 }

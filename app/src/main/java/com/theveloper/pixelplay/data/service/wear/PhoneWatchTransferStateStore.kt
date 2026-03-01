@@ -148,6 +148,19 @@ class PhoneWatchTransferStateStore @Inject constructor() {
         _watchSongIds.value = watchSongIdsByNodeId.values.flatten().toSet()
     }
 
+    fun markCancelled(requestId: String, error: String? = null) {
+        cleanupJobs.remove(requestId)?.cancel()
+        _transfers.update { map ->
+            val current = map[requestId] ?: return@update map
+            map + (requestId to current.copy(
+                status = WearTransferProgress.STATUS_CANCELLED,
+                error = error ?: current.error,
+                updatedAtMillis = System.currentTimeMillis(),
+            ))
+        }
+        scheduleTerminalCleanup(requestId)
+    }
+
     fun retainReachableWatchNodes(nodeIds: Set<String>) {
         watchSongIdsByNodeId.keys.toList().forEach { nodeId ->
             if (nodeId !in nodeIds) {
