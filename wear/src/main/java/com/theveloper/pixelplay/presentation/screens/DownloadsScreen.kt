@@ -37,6 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,6 +56,7 @@ import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import com.google.android.horologist.compose.layout.ScalingLazyColumn
 import com.google.android.horologist.compose.layout.rememberResponsiveColumnState
+import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.TransferState
 import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionIndicator
 import com.theveloper.pixelplay.presentation.components.PlayingEqIcon
@@ -87,6 +93,7 @@ fun DownloadsScreen(
     val playerState by playerViewModel.playerState.collectAsState()
     val isPhoneConnected by playerViewModel.isPhoneConnected.collectAsState()
     val palette = LocalWearPalette.current
+    val watchLibraryTitleFont = rememberWatchLibraryTitleFont()
     val columnState = rememberResponsiveColumnState()
     val context = LocalContext.current
     val audioPermission = remember {
@@ -146,6 +153,7 @@ fun DownloadsScreen(
                 it.status == WearTransferProgress.STATUS_CANCELLED
         }
         .sortedBy { it.songTitle.lowercase() }
+    val sectionAccentColor = MaterialTheme.colors.primary
 
     val background = palette.screenBackgroundColor()
     val surfaceContainer = palette.surfaceContainerColor()
@@ -165,12 +173,14 @@ fun DownloadsScreen(
             item {
                 Text(
                     text = "Watch Library",
-                    style = MaterialTheme.typography.title3,
+                    style = MaterialTheme.typography.title2,
+                    fontFamily = watchLibraryTitleFont,
+                    fontWeight = FontWeight(780),
                     color = palette.textPrimary,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 2.dp),
+                        .padding(bottom = 4.dp),
                 )
             }
 
@@ -207,14 +217,9 @@ fun DownloadsScreen(
 
             if (transferringStates.isNotEmpty()) {
                 item {
-                    Text(
-                        text = "Transferring from phone",
-                        style = MaterialTheme.typography.caption2,
-                        color = palette.textSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp, bottom = 2.dp),
+                    DownloadsSectionHeader(
+                        title = "Transferring from phone",
+                        color = sectionAccentColor,
                     )
                 }
 
@@ -262,14 +267,9 @@ fun DownloadsScreen(
 
             if (failedTransfers.isNotEmpty()) {
                 item {
-                    Text(
-                        text = "Transfer issues",
-                        style = MaterialTheme.typography.caption2,
-                        color = palette.textSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp, bottom = 2.dp),
+                    DownloadsSectionHeader(
+                        title = "Transfer issues",
+                        color = palette.textError,
                     )
                 }
 
@@ -314,31 +314,14 @@ fun DownloadsScreen(
                 }
             }
 
-            item {
-                Text(
-                    text = "Saved from phone",
-                    style = MaterialTheme.typography.caption2,
-                    color = palette.textSecondary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp, bottom = 2.dp),
-                )
-            }
-
-            if (localSongs.isEmpty()) {
+            if (localSongs.isNotEmpty()) {
                 item {
-                    Text(
-                        text = "No transferred songs",
-                        style = MaterialTheme.typography.body2,
-                        color = palette.textSecondary.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
+                    DownloadsSectionHeader(
+                        title = "Saved from phone",
+                        color = sectionAccentColor,
                     )
                 }
-            } else {
+
                 items(localSongs.size) { index ->
                     val song = localSongs[index]
                     val isCurrentSong = song.songId == playerState.songId && playerState.songId.isNotBlank()
@@ -372,16 +355,14 @@ fun DownloadsScreen(
                 }
             }
 
-            item {
-                Text(
-                    text = "Songs on watch storage",
-                    style = MaterialTheme.typography.caption2,
-                    color = palette.textSecondary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp, bottom = 2.dp),
-                )
+            if (deviceSongs.isNotEmpty()) {
+                item {
+                    DownloadsSectionHeader(
+                        title = "Songs on watch storage",
+                        color = sectionAccentColor,
+                        topPadding = 10.dp,
+                    )
+                }
             }
 
             if (!hasAudioPermission) {
@@ -613,6 +594,23 @@ fun DownloadsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun DownloadsSectionHeader(
+    title: String,
+    color: Color,
+    topPadding: androidx.compose.ui.unit.Dp = 6.dp,
+) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.caption2,
+        color = color,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = topPadding, bottom = 2.dp),
+    )
 }
 
 @Composable
@@ -1083,5 +1081,25 @@ private fun formatDuration(durationMs: Long): String {
         "%d:%02d:%02d".format(hours, minutes, seconds)
     } else {
         "%d:%02d".format(minutes, seconds)
+    }
+}
+
+@OptIn(ExperimentalTextApi::class)
+@Composable
+private fun rememberWatchLibraryTitleFont(): FontFamily {
+    return remember {
+        FontFamily(
+            Font(
+                resId = R.font.gflex_variable,
+                variationSettings = FontVariation.Settings(
+                    FontVariation.weight(710),
+                    FontVariation.width(132f),
+                    FontVariation.Setting("ROND", 82f),
+                    FontVariation.Setting("XTRA", 540f),
+                    FontVariation.Setting("YOPQ", 92f),
+                    FontVariation.Setting("YTLC", 512f),
+                ),
+            ),
+        )
     }
 }
