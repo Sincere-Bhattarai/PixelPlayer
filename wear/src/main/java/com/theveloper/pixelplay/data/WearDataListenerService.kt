@@ -14,6 +14,7 @@ import com.google.android.gms.wearable.WearableListenerService
 import com.theveloper.pixelplay.presentation.WearMainActivity
 import com.theveloper.pixelplay.shared.WearBrowseResponse
 import com.theveloper.pixelplay.shared.WearDataPaths
+import com.theveloper.pixelplay.shared.WearPlaybackResult
 import com.theveloper.pixelplay.shared.WearPlayerState
 import com.theveloper.pixelplay.shared.WearTransferMetadata
 import com.theveloper.pixelplay.shared.WearTransferProgress
@@ -134,7 +135,8 @@ class WearDataListenerService : WearableListenerService() {
     }
 
     private fun maybeAutoLaunchPlayer(playerState: WearPlayerState) {
-        val isNowPlaying = playerState.isPlaying && playerState.songId.isNotEmpty()
+        val playerIdentity = playerState.playerIdentity()
+        val isNowPlaying = playerState.isPlaying && playerIdentity.isNotEmpty()
         if (!isNowPlaying) {
             lastKnownPlaying = false
             return
@@ -145,7 +147,7 @@ class WearDataListenerService : WearableListenerService() {
         }
 
         val playbackJustStarted = !lastKnownPlaying
-        val songChangedWhilePlaying = playerState.songId != lastAutoLaunchSongId
+        val songChangedWhilePlaying = playerIdentity != lastAutoLaunchSongId
 
         val now = SystemClock.elapsedRealtime()
         val keepAliveExpired = now - lastAutoLaunchElapsedMs >= AUTO_LAUNCH_KEEP_ALIVE_MS
@@ -172,13 +174,20 @@ class WearDataListenerService : WearableListenerService() {
         runCatching {
             startActivity(intent)
             lastAutoLaunchElapsedMs = now
-            lastAutoLaunchSongId = playerState.songId
+            lastAutoLaunchSongId = playerIdentity
             lastKnownPlaying = true
             Timber.tag(TAG).d("Auto-opened Wear player for active phone playback")
         }.onFailure { e ->
             lastKnownPlaying = true
             Timber.tag(TAG).w(e, "Failed to auto-open Wear player")
         }
+    }
+
+    private fun WearPlayerState.playerIdentity(): String {
+        if (songId.isNotBlank()) return songId
+        val title = songTitle.trim()
+        if (title.isNotEmpty()) return "$title|${artistName.trim()}"
+        return ""
     }
 
     /**
@@ -230,14 +239,48 @@ class WearDataListenerService : WearableListenerService() {
                 }
             }
 
+            WearDataPaths.PLAYBACK_RESULT -> {
+                try {
+                    val resultJson = String(messageEvent.data, Charsets.UTF_8)
+                    val result = json.decodeFromString<WearPlaybackResult>(resultJson)
+                    stateRepository.setPhoneConnected(true)
+                    stateRepository.publishPlaybackResult(result)
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to process playback result")
+                }
+            }
+
             WearDataPaths.TRANSFER_REQUEST -> {
                 try {
                     val requestJson = String(messageEvent.data, Charsets.UTF_8)
                     val request = json.decodeFromString<WearTransferRequest>(requestJson)
-                    transferRepository.requestTransfer(request.songId)
+                    transferRepository.requestTransfer(
+                        songId = request.songId,
+                        requestId = request.requestId,
+                        targetNodeId = messageEvent.sourceNodeId,
+                    )
                     Timber.tag(TAG).d("Received phone transfer request for songId=${request.songId}")
                 } catch (e: Exception) {
                     Timber.tag(TAG).e(e, "Failed to process transfer request")
+                }
+            }
+
+            WearDataPaths.TRANSFER_CANCEL -> {
+                try {
+                    val requestJson = String(messageEvent.data, Charsets.UTF_8)
+                    val request = json.decodeFromString<WearTransferRequest>(requestJson)
+                    transferRepository.cancelTransfer(
+                        requestId = request.requestId,
+                        notifyPhone = false,
+                    )
+                } catch (e: Exception) {
+                    Timber.tag(TAG).e(e, "Failed to process transfer cancel")
+                }
+            }
+
+            WearDataPaths.WATCH_LIBRARY_QUERY -> {
+                scope.launch {
+                    transferRepository.publishLibraryState(targetNodeId = messageEvent.sourceNodeId)
                 }
             }
 
@@ -248,6 +291,8 @@ class WearDataListenerService : WearableListenerService() {
                     stateRepository.updateVolumeState(
                         level = volumeState.level,
                         max = volumeState.max,
+                        routeType = volumeState.routeType,
+                        routeName = volumeState.routeName,
                     )
                 } catch (e: Exception) {
                     Timber.tag(TAG).e(e, "Failed to process volume state update")
@@ -270,25 +315,27 @@ class WearDataListenerService : WearableListenerService() {
             WearDataPaths.TRANSFER_CHANNEL -> {
                 Timber.tag(TAG).d("Audio transfer channel opened")
                 scope.launch {
+                    val channelClient = Wearable.getChannelClient(this@WearDataListenerService)
                     runCatching {
-                        val channelClient = Wearable.getChannelClient(this@WearDataListenerService)
-                        val inputStream = channelClient.getInputStream(channel).await()
-                        val requestId = readLengthPrefixedString(inputStream, "requestId")
-                        Timber.tag(TAG).d("Audio transfer channel: requestId=$requestId")
-                        transferRepository.onChannelOpened(requestId, inputStream)
+                        channelClient.getInputStream(channel).await().use { inputStream ->
+                            val requestId = readLengthPrefixedString(inputStream, "requestId")
+                            Timber.tag(TAG).d("Audio transfer channel: requestId=$requestId")
+                            transferRepository.onChannelOpened(requestId, inputStream)
+                        }
                     }.onFailure { e ->
                         Timber.tag(TAG).e(e, "Failed to receive audio transfer channel")
                     }
+                    runCatching { channelClient.close(channel).await() }
+                        .onFailure { e -> Timber.tag(TAG).w(e, "Failed to close audio transfer channel") }
                 }
             }
 
             WearDataPaths.TRANSFER_ARTWORK_CHANNEL -> {
                 Timber.tag(TAG).d("Artwork transfer channel opened")
                 scope.launch {
+                    val channelClient = Wearable.getChannelClient(this@WearDataListenerService)
                     runCatching {
-                        val channelClient = Wearable.getChannelClient(this@WearDataListenerService)
-                        val inputStream = channelClient.getInputStream(channel).await()
-                        inputStream.use { stream ->
+                        channelClient.getInputStream(channel).await().use { stream ->
                             val requestId = readLengthPrefixedString(stream, "requestId")
                             val songId = readLengthPrefixedString(stream, "songId")
                             val artworkBytes = stream.readBytesSafely()
@@ -308,6 +355,8 @@ class WearDataListenerService : WearableListenerService() {
                     }.onFailure { e ->
                         Timber.tag(TAG).e(e, "Failed to receive artwork transfer channel")
                     }
+                    runCatching { channelClient.close(channel).await() }
+                        .onFailure { e -> Timber.tag(TAG).w(e, "Failed to close artwork transfer channel") }
                 }
             }
 

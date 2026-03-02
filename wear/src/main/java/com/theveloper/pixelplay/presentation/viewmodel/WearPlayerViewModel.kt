@@ -8,6 +8,7 @@ import com.theveloper.pixelplay.data.WearLocalPlayerRepository
 import com.theveloper.pixelplay.data.WearOutputTarget
 import com.theveloper.pixelplay.data.WearPlaybackController
 import com.theveloper.pixelplay.data.WearStateRepository
+import com.theveloper.pixelplay.data.WearTransferRepository
 import com.theveloper.pixelplay.data.WearVolumeRepository
 import com.theveloper.pixelplay.shared.WearPlayerState
 import com.theveloper.pixelplay.shared.WearThemePalette
@@ -38,11 +39,13 @@ class WearPlayerViewModel @Inject constructor(
     private val stateRepository: WearStateRepository,
     private val playbackController: WearPlaybackController,
     private val localPlayerRepository: WearLocalPlayerRepository,
+    private val transferRepository: WearTransferRepository,
     private val volumeRepository: WearVolumeRepository,
 ) : ViewModel() {
     companion object {
         private const val PHONE_SYNC_BOOTSTRAP_ATTEMPTS = 3
         private const val PHONE_SYNC_BOOTSTRAP_RETRY_DELAY_MS = 1200L
+        private const val PHONE_ROUTE_REFRESH_INTERVAL_MS = 5000L
     }
 
     private val _sleepTimerUiState = MutableStateFlow(WearSleepTimerUiState())
@@ -50,6 +53,8 @@ class WearPlayerViewModel @Inject constructor(
 
     /** Whether local playback is currently active on the watch */
     val isLocalPlaybackActive: StateFlow<Boolean> = localPlayerRepository.isLocalPlaybackActive
+    private val localSongs = transferRepository.localSongs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** Current target selected by the user in Output screen */
     val outputTarget: StateFlow<WearOutputTarget> = stateRepository.outputTarget
@@ -99,8 +104,13 @@ class WearPlayerViewModel @Inject constructor(
         if (target == WearOutputTarget.WATCH) localSeed else null
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val phoneThemePalette: StateFlow<WearThemePalette?> = playerState
-        .map { it.themePalette }
+    val themePalette: StateFlow<WearThemePalette?> = combine(
+        stateRepository.outputTarget,
+        stateRepository.playerState,
+        localPlayerRepository.localThemePalette,
+    ) { target, remoteState, localThemePalette ->
+        if (target == WearOutputTarget.PHONE) remoteState.themePalette else localThemePalette
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val isPhoneConnected: StateFlow<Boolean> = stateRepository.isPhoneConnected
@@ -123,19 +133,47 @@ class WearPlayerViewModel @Inject constructor(
 
     val activeVolumeDeviceName: StateFlow<String> = combine(
         isWatchOutputSelected,
+        phoneVolumeState,
         stateRepository.phoneDeviceName,
-    ) { isWatchOutput, phoneDeviceName ->
+    ) { isWatchOutput, phoneVolume, phoneDeviceName ->
         if (isWatchOutput) {
             Build.MODEL.takeIf { it.isNotBlank() } ?: "Watch"
         } else {
-            phoneDeviceName.ifBlank { "Phone" }
+            phoneVolume.routeName.ifBlank { phoneDeviceName.ifBlank { "Phone" } }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Phone")
+
+    val activeOutputRouteType: StateFlow<String> = combine(
+        isWatchOutputSelected,
+        phoneVolumeState,
+    ) { isWatchOutput, phoneVolume ->
+        if (isWatchOutput) {
+            WearVolumeState.ROUTE_TYPE_WATCH
+        } else {
+            phoneVolume.routeType.ifBlank { WearVolumeState.ROUTE_TYPE_PHONE }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), WearVolumeState.ROUTE_TYPE_PHONE)
+
+    val canCurrentSongPlayOnWatch: StateFlow<Boolean> = combine(
+        isLocalPlaybackActive,
+        playerState,
+        localSongs,
+    ) { localActive, player, songs ->
+        localActive || (player.songId.isNotBlank() && songs.any { it.songId == player.songId })
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
         viewModelScope.launch {
             outputTarget.collect {
                 refreshActiveVolumeState()
+            }
+        }
+        viewModelScope.launch {
+            while (true) {
+                if (!isWatchOutputSelected.value && isPhoneConnected.value) {
+                    playbackController.requestPhoneVolumeState()
+                }
+                delay(PHONE_ROUTE_REFRESH_INTERVAL_MS)
             }
         }
         bootstrapPhoneStateSync()
@@ -163,12 +201,30 @@ class WearPlayerViewModel @Inject constructor(
     }
 
     fun selectOutput(target: WearOutputTarget) {
-        if (target == WearOutputTarget.WATCH && !localPlayerRepository.isLocalPlaybackActive.value) {
-            return
-        }
-        stateRepository.setOutputTarget(target)
-        if (target == WearOutputTarget.PHONE && localPlayerRepository.localPlayerState.value.isPlaying) {
-            localPlayerRepository.pause()
+        when (target) {
+            WearOutputTarget.WATCH -> {
+                if (localPlayerRepository.isLocalPlaybackActive.value) {
+                    stateRepository.setOutputTarget(WearOutputTarget.WATCH)
+                    return
+                }
+
+                val remoteSongId = stateRepository.playerState.value.songId
+                if (remoteSongId.isBlank()) return
+                val songs = localSongs.value
+                val startIndex = songs.indexOfFirst { it.songId == remoteSongId }
+                if (startIndex == -1 || songs.isEmpty()) return
+
+                localPlayerRepository.playLocalSongs(songs, startIndex)
+                stateRepository.setOutputTarget(WearOutputTarget.WATCH)
+            }
+
+            WearOutputTarget.PHONE -> {
+                stateRepository.setOutputTarget(WearOutputTarget.PHONE)
+                if (localPlayerRepository.localPlayerState.value.isPlaying) {
+                    localPlayerRepository.pause()
+                }
+                playbackController.requestPhoneVolumeState()
+            }
         }
     }
 

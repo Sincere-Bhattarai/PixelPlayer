@@ -61,6 +61,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.subcomps.AutoSizingTextToFill
 import com.theveloper.pixelplay.utils.formatDuration
@@ -95,13 +96,20 @@ fun SongInfoBottomSheet(
     onNavigateToArtist: () -> Unit,
     onEditSong: (title: String, artist: String, album: String, genre: String, lyrics: String, trackNumber: Int, coverArtUpdate: CoverArtUpdate?) -> Unit,
     generateAiMetadata: suspend (List<String>) -> Result<SongMetadata>,
-    removeFromListTrigger: () -> Unit
+    removeFromListTrigger: () -> Unit,
+    songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     var showEditSheet by remember { mutableStateOf(false) }
-    val songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
     val isPixelPlayWatchAvailable by songInfoViewModel.isPixelPlayWatchAvailable.collectAsState()
     val isSendingToWatch by songInfoViewModel.isSendingToWatch.collectAsState()
+    val activeWatchTransfer by songInfoViewModel.activeWatchTransfer.collectAsState()
+    val watchSongIds by songInfoViewModel.watchSongIds.collectAsState()
+    val currentSongTransfer = activeWatchTransfer?.takeIf { it.songId == song.id }
+    val currentSongTransferPercent = ((currentSongTransfer?.progress ?: 0f) * 100f).toInt().coerceIn(0, 100)
+    val isSongSavedOnWatch = remember(song.id, watchSongIds, currentSongTransfer) {
+        currentSongTransfer == null && watchSongIds.contains(song.id)
+    }
     val canSendToWatch = remember(song.path, song.contentUriString) {
         songInfoViewModel.isLocalSongForWatchTransfer(song)
     }
@@ -144,6 +152,24 @@ fun SongInfoBottomSheet(
     val favoriteButtonContentColor by animateColorAsState(
         targetValue = if (isFavorite) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = tween(durationMillis = 300), label = "FavoriteContentColorAnimation"
+    )
+    val sendToWatchContainerColor by animateColorAsState(
+        targetValue = if (isSendingToWatch) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.primaryContainer
+        },
+        animationSpec = tween(durationMillis = 250),
+        label = "SendToWatchContainerColorAnimation"
+    )
+    val sendToWatchContentColor by animateColorAsState(
+        targetValue = if (isSendingToWatch) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        },
+        animationSpec = tween(durationMillis = 250),
+        label = "SendToWatchContentColorAnimation"
     )
 
     val favoriteButtonShape = AbsoluteSmoothCornerShape(
@@ -422,15 +448,15 @@ fun SongInfoBottomSheet(
                                     }
                                 }
 
-                                if (isPixelPlayWatchAvailable && canSendToWatch) {
+                                if (isPixelPlayWatchAvailable && canSendToWatch && !isSongSavedOnWatch) {
                                     item {
                                         FilledTonalButton(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .heightIn(min = 66.dp),
                                             colors = ButtonDefaults.filledTonalButtonColors(
-                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                                containerColor = sendToWatchContainerColor,
+                                                contentColor = sendToWatchContentColor
                                             ),
                                             shape = CircleShape,
                                             enabled = !isSendingToWatch,
@@ -440,12 +466,26 @@ fun SongInfoBottomSheet(
                                                 }
                                             }
                                         ) {
-                                            Icon(
-                                                Icons.Rounded.Share,
-                                                contentDescription = "Send to watch"
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(if (isSendingToWatch) "Sending..." else "Send to Watch")
+                                            if (isSendingToWatch) {
+                                                LoadingIndicator(modifier = Modifier.size(18.dp))
+                                                Spacer(Modifier.width(10.dp))
+                                                Text(
+                                                    if (currentSongTransfer != null && currentSongTransfer.totalBytes > 0L) {
+                                                        "Transferring $currentSongTransferPercent%"
+                                                    } else if (currentSongTransfer != null) {
+                                                        "Transferring to Watch"
+                                                    } else {
+                                                        "Transfer in progress"
+                                                    }
+                                                )
+                                            } else {
+                                                Icon(
+                                                    painter = painterResource(R.drawable.rounded_watch_arrow_down_24),
+                                                    contentDescription = "Send song to watch"
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Send to Watch")
+                                            }
                                         }
                                     }
                                 }

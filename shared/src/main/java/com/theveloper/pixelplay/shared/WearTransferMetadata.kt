@@ -22,5 +22,7 @@ data class WearTransferMetadata(
     val sampleRate: Int,
     /** Optional seed color extracted from album art on phone, used for offline watch theming. */
     val paletteSeedArgb: Int? = null,
+    /** Full watch palette snapshot so local watch playback matches phone playback exactly. */
+    val themePalette: WearThemePalette? = null,
     val error: String? = null,
 )

@@ -5,13 +5,17 @@ package com.theveloper.pixelplay.presentation.screens
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 
 import android.os.Trace
+import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,6 +61,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material.icons.rounded.ViewModule
 import com.theveloper.pixelplay.presentation.components.ToggleSegmentButton
 import androidx.compose.material3.LoadingIndicator
@@ -94,9 +99,18 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -146,6 +160,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
+import com.theveloper.pixelplay.presentation.viewmodel.SongInfoBottomSheetViewModel
 import com.theveloper.pixelplay.data.model.LibraryTabId
 import com.theveloper.pixelplay.data.model.toLibraryTabIdOrNull
 import com.theveloper.pixelplay.data.preferences.LibraryNavigationMode
@@ -166,6 +181,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -201,6 +217,8 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ripple
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.theveloper.pixelplay.presentation.components.AutoScrollingTextOnDemand
 import com.theveloper.pixelplay.presentation.screens.CreatePlaylistDialog
 import com.theveloper.pixelplay.presentation.components.PlaylistBottomSheet
@@ -210,6 +228,8 @@ import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import java.util.Locale
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.ui.focus.focusModifier
 import com.theveloper.pixelplay.data.model.PlaylistShapeType
 import kotlinx.coroutines.flow.first
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -218,6 +238,8 @@ import androidx.paging.LoadState
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
 import com.theveloper.pixelplay.presentation.components.LibrarySortBottomSheet
 import com.theveloper.pixelplay.presentation.components.subcomps.EnhancedSongListItem
+import com.theveloper.pixelplay.data.service.wear.PhoneWatchTransferState
+import com.theveloper.pixelplay.shared.WearTransferProgress
 import kotlin.math.abs
 
 val ListExtraBottomGap = 30.dp
@@ -225,6 +247,126 @@ val PlayerSheetCollapsedCornerRadius = 32.dp
 private const val MAX_ALBUM_MULTI_SELECTION = 6
 private const val ENABLE_FOLDERS_SOURCE_TOGGLE = false
 private const val ENABLE_FOLDERS_STORAGE_FILTER = false
+
+@Composable
+private fun WatchTransferProgressDialog(
+    transfer: PhoneWatchTransferState,
+    onDismiss: () -> Unit,
+    onCancelTransfer: () -> Unit,
+) {
+    val context = LocalContext.current
+    val animatedProgress by animateFloatAsState(
+        targetValue = transfer.progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 300),
+        label = "WatchTransferProgressDialog"
+    )
+    val progressPercent = (animatedProgress * 100f).toInt().coerceIn(0, 100)
+    val bytesText = if (transfer.totalBytes > 0L) {
+        val sent = Formatter.formatFileSize(context, transfer.bytesTransferred)
+        val total = Formatter.formatFileSize(context, transfer.totalBytes)
+        "$sent / $total"
+    } else {
+        "Starting transfer..."
+    }
+    val statusText = when (transfer.status) {
+        WearTransferProgress.STATUS_TRANSFERRING -> "Transferring"
+        WearTransferProgress.STATUS_COMPLETED -> "Completed"
+        WearTransferProgress.STATUS_FAILED -> "Failed"
+        WearTransferProgress.STATUS_CANCELLED -> "Cancelled"
+        else -> "Preparing"
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            tonalElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Sending to Watch",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .padding(vertical = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    LoadingIndicator(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .scale(1.84f),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "$progressPercent%",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontSize = MaterialTheme.typography.labelLarge.fontSize * 1.4f
+                        ),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+                LinearWavyProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(50)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+                Text(
+                    text = transfer.songTitle.ifBlank { "Preparing transfer..." },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "$statusText • $bytesText",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                transfer.error?.takeIf { it.isNotBlank() }?.let { errorText ->
+                    Text(
+                        text = errorText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                Button(
+                    modifier = Modifier.padding(top = 4.dp),
+                    onClick = onCancelTransfer,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text(text = "Cancel transfer")
+                }
+            }
+        }
+    }
+}
 
 private data class LibraryScreenPlayerProjection(
     val currentFolder: MusicFolder? = null,
@@ -275,7 +417,8 @@ fun LibraryScreen(
     navController: NavController,
     playerViewModel: PlayerViewModel = hiltViewModel(),
     playlistViewModel: PlaylistViewModel = hiltViewModel(),
-    libraryViewModel: LibraryViewModel = hiltViewModel()
+    libraryViewModel: LibraryViewModel = hiltViewModel(),
+    songInfoBottomSheetViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
 ) {
     // La recolección de estados de alto nivel se mantiene mínima.
     val context = LocalContext.current // Added context
@@ -315,6 +458,9 @@ fun LibraryScreen(
         }
     }
     val isSortSheetVisible by playerViewModel.isSortingSheetVisible.collectAsStateWithLifecycle()
+    val isSendingToWatch by songInfoBottomSheetViewModel.isSendingToWatch.collectAsStateWithLifecycle()
+    val activeWatchTransfer by songInfoBottomSheetViewModel.activeWatchTransfer.collectAsStateWithLifecycle()
+    var showWatchTransferDialog by remember { mutableStateOf(false) }
     val canNavigateBackInFolders by remember(playerViewModel) {
         playerViewModel.playerUiState
             .map { uiState -> uiState.currentFolder != null && uiState.folderBackGestureNavigationEnabled }
@@ -336,6 +482,12 @@ fun LibraryScreen(
 
     var showReorderTabsSheet by remember { mutableStateOf(false) }
     var showTabSwitcherSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(activeWatchTransfer?.requestId) {
+        if (activeWatchTransfer == null) {
+            showWatchTransferDialog = false
+        }
+    }
 
     // Multi-selection state
     val multiSelectionState = playerViewModel.multiSelectionStateHolder
@@ -564,20 +716,18 @@ fun LibraryScreen(
                 title = {
                     if (isCompactNavigation) {
                         LibraryNavigationPill(
+                            modifier = Modifier,
                             title = currentTabTitle,
                             isExpanded = showTabSwitcherSheet,
+                            showIcon = !isSendingToWatch,
                             iconRes = currentTab.iconRes(),
                             pageIndex = pagerState.currentPage,
+                            compressForWatchTransfer = isSendingToWatch,
                             onClick = {
                                 showTabSwitcherSheet = true
                             },
                             onArrowClick = { showTabSwitcherSheet = true }
                         )
-//                        LibraryNavigationPill(
-//                            title = currentTabTitle,
-//                            animationDirection = pillAnimationDirection,
-//                            onClick = { showTabSwitcherSheet = true }
-//                        )
                     } else {
                         Text(
                             modifier = Modifier.padding(start = 8.dp),
@@ -592,6 +742,41 @@ fun LibraryScreen(
                     }
                 },
                 actions = {
+                    if (isSendingToWatch) {
+                        val watchTransferProgress = activeWatchTransfer?.progress ?: 0f
+                        val watchTransferPercent = (watchTransferProgress * 100f).toInt().coerceIn(0, 100)
+                        Surface(
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .wrapContentWidth()
+                                .height(40.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = activeWatchTransfer != null) {
+                                    showWatchTransferDialog = true
+                                },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.rounded_watch_arrow_down_24),
+                                    contentDescription = "Watch transfer",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "$watchTransferPercent%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     FilledIconButton(
                         modifier = Modifier.padding(end = 14.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
@@ -1404,6 +1589,18 @@ fun LibraryScreen(
         }
     )
 
+    if (showWatchTransferDialog && activeWatchTransfer != null) {
+        val currentWatchTransfer = activeWatchTransfer!!
+        WatchTransferProgressDialog(
+            transfer = currentWatchTransfer,
+            onDismiss = { showWatchTransferDialog = false },
+            onCancelTransfer = {
+                songInfoBottomSheetViewModel.cancelWatchTransfer(currentWatchTransfer.requestId)
+                showWatchTransferDialog = false
+            }
+        )
+    }
+
     if (showSongInfoBottomSheet && selectedSongForInfo != null) {
         val currentSong = selectedSongForInfo
         val isFavorite = remember(currentSong?.id, favoriteIds) { derivedStateOf { currentSong?.let {
@@ -1453,7 +1650,8 @@ fun LibraryScreen(
                 generateAiMetadata = { fields ->
                     playerViewModel.generateAiMetadata(currentSong, fields)
                 },
-                removeFromListTrigger = {}
+                removeFromListTrigger = {},
+                songInfoViewModel = songInfoBottomSheetViewModel
             )
         }
     }
@@ -1705,138 +1903,280 @@ private fun CompactLibraryPagerIndicator(
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun LibraryNavigationPill(
+    modifier: Modifier = Modifier,
     title: String,
     isExpanded: Boolean,
     iconRes: Int,
+    showIcon: Boolean = true,
     pageIndex: Int,
+    compressForWatchTransfer: Boolean,
     onClick: () -> Unit,
     onArrowClick: () -> Unit
 ) {
     data class PillState(val pageIndex: Int, val iconRes: Int, val title: String)
 
-    val pillRadius = 26.dp
+    val pillRadius = 50.dp//26.dp
     val innerRadius = 4.dp
-    // Radio para cuando está expandido/seleccionado (totalmente redondo)
-    val expandedRadius = 60.dp
+    val titleHorizontalPadding = 14.dp
+    val titleVerticalPadding = 10.dp
+    val titleIconSize = 22.dp
+    val titleIconSpacing = 10.dp
+    val pillHeight = 52.dp
+    val arrowContentWidth = 36.dp
+    val pillGap = 4.dp
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    var availableWidthPx by remember { mutableStateOf(0) }
 
-    // Animación Esquina Flecha (Interna):
-    // Depende de 'isExpanded':
-    // - true: Se vuelve redonda (expandedRadius/pillRadius) separándose visualmente.
-    // - false: Se mantiene recta (innerRadius) pareciendo unida al título.
     val animatedArrowCorner by animateDpAsState(
         targetValue = if (isExpanded) pillRadius else innerRadius,
         label = "ArrowCornerAnimation"
+    )
+    val compressionProgress by animateFloatAsState(
+        targetValue = if (compressForWatchTransfer) 1f else 0f,
+        label = "LibraryPillCompression"
     )
 
     val arrowRotation by animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
         label = "ArrowRotation"
     )
+    val targetArrowHorizontalPadding =
+        LibraryNavigationPillArrowPaddingExpanded -
+            (LibraryNavigationPillArrowPaddingExpanded - LibraryNavigationPillArrowPaddingCompressed) *
+            compressionProgress
+    val animatedArrowHorizontalPadding by animateDpAsState(
+        targetValue = targetArrowHorizontalPadding,
+        label = "LibraryPillArrowPadding"
+    )
 
-    // IntrinsicSize.Min en el Row + fillMaxHeight en los hijos asegura misma altura
-    Row(
-        modifier = Modifier
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
             .padding(start = 4.dp)
-            .height(IntrinsicSize.Min),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .onSizeChanged { availableWidthPx = it.width },
+        contentAlignment = Alignment.CenterStart
     ) {
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = pillRadius,
-                bottomStart = pillRadius,
-                topEnd = innerRadius,
-                bottomEnd = innerRadius
-            ),
-            tonalElevation = 8.dp,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier
-                .fillMaxHeight()
-                .clip(
-                    RoundedCornerShape(
-                        topStart = pillRadius,
-                        bottomStart = pillRadius,
-                        topEnd = innerRadius,
-                        bottomEnd = innerRadius
-                    )
-                )
-                .clickable(onClick = onClick)
+        val baseTitleStyle = rememberLibraryNavigationPillTitleStyle(
+            widthAxis = LibraryNavigationPillTitleWidthMax
+        )
+        val idealTextWidth = with(density) {
+            textMeasurer.measure(
+                text = AnnotatedString(title),
+                style = baseTitleStyle,
+                maxLines = 1,
+                softWrap = false,
+            ).size.width.toDp()
+        }
+        val idealTitleWidth = idealTextWidth +
+            titleHorizontalPadding * 2 +
+            titleIconSize +
+            titleIconSpacing
+        val availableWidth = if (availableWidthPx > 0) {
+            with(density) { availableWidthPx.toDp() }
+        } else {
+            idealTitleWidth + arrowContentWidth + (targetArrowHorizontalPadding * 2) + pillGap
+        }
+        val targetArrowWidth = arrowContentWidth + (targetArrowHorizontalPadding * 2)
+        val maxTitleWidth = (availableWidth - targetArrowWidth - pillGap).coerceAtLeast(0.dp)
+        val naturalTitleWidth = minOf(idealTitleWidth, maxTitleWidth)
+        val minCompressedTitleWidth = (
+            titleHorizontalPadding * 2 +
+                titleIconSize +
+                titleIconSpacing +
+                LibraryNavigationPillMinimumTextWidth
+            ).coerceAtMost(maxTitleWidth)
+        val forcedCompressionWidth = minOf(
+            LibraryNavigationPillForcedCompressionWidth,
+            (naturalTitleWidth - minCompressedTitleWidth).coerceAtLeast(0.dp),
+        )
+        val targetTitleWidth = (
+            naturalTitleWidth - (forcedCompressionWidth * compressionProgress)
+            ).coerceAtLeast(minCompressedTitleWidth)
+        val widthCompressionRatio = if (idealTitleWidth.value > 0f) {
+            (targetTitleWidth.value / idealTitleWidth.value).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+        val widthAxisBySpace = LibraryNavigationPillTitleWidthMin +
+            (LibraryNavigationPillTitleWidthMax - LibraryNavigationPillTitleWidthMin) *
+            widthCompressionRatio.coerceIn(0f, 1f)
+        val forcedWidthAxis = LibraryNavigationPillTitleWidthMax -
+            (LibraryNavigationPillTitleWidthMax - LibraryNavigationPillCompressedWidthAxis) *
+            compressionProgress
+        val targetWidthAxis = minOf(widthAxisBySpace, forcedWidthAxis)
+        val animatedTitleWidth by animateDpAsState(
+            targetValue = targetTitleWidth,
+            label = "LibraryPillTitleWidth"
+        )
+        val animatedWidthAxis by animateFloatAsState(
+            targetValue = targetWidthAxis,
+            label = "LibraryPillTitleAxis"
+        )
+        val titleStyle = rememberLibraryNavigationPillTitleStyle(widthAxis = animatedWidthAxis)
+
+        Row(
+            modifier = Modifier.height(pillHeight),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(pillGap)
         ) {
-            Box(
-                modifier = Modifier.padding(start = 18.dp, end = 14.dp),
-                contentAlignment = Alignment.CenterStart
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = pillRadius,
+                    bottomStart = pillRadius,
+                    topEnd = innerRadius,
+                    bottomEnd = innerRadius
+                ),
+                tonalElevation = 8.dp,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier
+                    .width(animatedTitleWidth)
+                    .height(pillHeight)
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = pillRadius,
+                            bottomStart = pillRadius,
+                            topEnd = innerRadius,
+                            bottomEnd = innerRadius
+                        )
+                    )
+                    .clickable(onClick = onClick)
             ) {
-                AnimatedContent(
-                    targetState = PillState(pageIndex = pageIndex, iconRes = iconRes, title = title),
-                    transitionSpec = {
-                        val direction = targetState.pageIndex.compareTo(initialState.pageIndex).coerceIn(-1, 1)
-                        val slideIn = slideInHorizontally { fullWidth -> if (direction >= 0) fullWidth else -fullWidth } + fadeIn()
-                        val slideOut = slideOutHorizontally { fullWidth -> if (direction >= 0) -fullWidth else fullWidth } + fadeOut()
-                        slideIn.togetherWith(slideOut)
-                    },
-                    label = "LibraryPillTitle"
-                ) { targetState ->
-                    Row(
-                        modifier = Modifier.padding(vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            painter = painterResource(id = targetState.iconRes),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Text(
-                            text = targetState.title,
-                            style = MaterialTheme.typography.titleLarge.copy(fontSize = 26.sp),
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                Box(
+                    modifier = Modifier.padding(horizontal = titleHorizontalPadding),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    AnimatedContent(
+                        targetState = PillState(pageIndex = pageIndex, iconRes = iconRes, title = title),
+                        transitionSpec = {
+                            val direction = targetState.pageIndex.compareTo(initialState.pageIndex).coerceIn(-1, 1)
+                            val slideIn = slideInHorizontally { fullWidth -> if (direction >= 0) fullWidth else -fullWidth } + fadeIn()
+                            val slideOut = slideOutHorizontally { fullWidth -> if (direction >= 0) -fullWidth else fullWidth } + fadeOut()
+                            slideIn.togetherWith(slideOut)
+                        },
+                        label = "LibraryPillTitle"
+                    ) { targetState ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = titleVerticalPadding)
+                                .animateContentSize(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AnimatedVisibility(
+                                visible = showIcon,
+                                enter = expandHorizontally(
+                                    animationSpec = tween(durationMillis = 220),
+                                    expandFrom = Alignment.Start
+                                ) + fadeIn(animationSpec = tween(durationMillis = 180)),
+                                exit = shrinkHorizontally(
+                                    animationSpec = tween(durationMillis = 220),
+                                    shrinkTowards = Alignment.Start
+                                ) + fadeOut(animationSpec = tween(durationMillis = 160))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = targetState.iconRes),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(titleIconSize),
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.width(titleIconSpacing))
+                                }
+                            }
+                            Text(
+                                modifier = Modifier.weight(1f, fill = false),
+                                text = targetState.title,
+                                style = titleStyle,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // --- PARTE 2: FLECHA (Cambia de forma según estado) ---
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = animatedArrowCorner, // Anima entre 4.dp y 26.dp
-                bottomStart = animatedArrowCorner, // Anima entre 4.dp y 26.dp
-                topEnd = pillRadius,
-                bottomEnd = pillRadius
-            ),
-            tonalElevation = 8.dp,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier
-                .fillMaxHeight()
-                .clip(
-                    RoundedCornerShape(
-                        topStart = animatedArrowCorner, // Anima entre 4.dp y 26.dp
-                        bottomStart = animatedArrowCorner, // Anima entre 4.dp y 26.dp
-                        topEnd = pillRadius,
-                        bottomEnd = pillRadius
-                    )
-                )
-                .clickable(
-                    indication = ripple(),
-                    interactionSource = remember { MutableInteractionSource() },
-                    onClick = onArrowClick
-                )
-        ) {
-            Box(
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = animatedArrowCorner,
+                    bottomStart = animatedArrowCorner,
+                    topEnd = pillRadius,
+                    bottomEnd = pillRadius
+                ),
+                tonalElevation = 8.dp,
+                color = MaterialTheme.colorScheme.primaryContainer,
                 modifier = Modifier
-                    .padding(horizontal = 10.dp)
-                    .width(36.dp),
-                contentAlignment = Alignment.Center
+                    .height(pillHeight)
+                    .clip(
+                        RoundedCornerShape(
+                            topStart = animatedArrowCorner,
+                            bottomStart = animatedArrowCorner,
+                            topEnd = pillRadius,
+                            bottomEnd = pillRadius
+                        )
+                    )
+                    .clickable(
+                        indication = ripple(),
+                        interactionSource = remember { MutableInteractionSource() },
+                        onClick = onArrowClick
+                    )
             ) {
-                Icon(
-                    modifier = Modifier.rotate(arrowRotation),
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Expandir menú",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = animatedArrowHorizontalPadding)
+                        .width(arrowContentWidth),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        modifier = Modifier.rotate(arrowRotation),
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "Expandir menú",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
+    }
+}
+
+private const val LibraryNavigationPillTitleWidthMin = 18f
+private const val LibraryNavigationPillTitleWidthMax = 100f
+private const val LibraryNavigationPillCompressedWidthAxis = 74f
+private val LibraryNavigationPillForcedCompressionWidth = 12.dp
+private val LibraryNavigationPillMinimumTextWidth = 56.dp
+private val LibraryNavigationPillArrowPaddingExpanded = 10.dp
+private val LibraryNavigationPillArrowPaddingCompressed = 4.dp
+
+@OptIn(ExperimentalTextApi::class)
+@Composable
+private fun rememberLibraryNavigationPillTitleStyle(widthAxis: Float): TextStyle {
+    return remember(widthAxis) {
+        TextStyle(
+            fontFamily = FontFamily(
+                Font(
+                    resId = R.font.gflex_variable,
+                    variationSettings = FontVariation.Settings(
+                        FontVariation.weight(400),
+                        FontVariation.width(widthAxis.coerceIn(
+                            LibraryNavigationPillTitleWidthMin,
+                            LibraryNavigationPillTitleWidthMax
+                        )),
+                        FontVariation.Setting("ROND", 100f),
+                        FontVariation.Setting("XTRA", 520f),
+                        FontVariation.Setting("YOPQ", 90f),
+                        FontVariation.Setting("YTLC", 505f)
+                    )
+                )
+            ),
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 26.sp,
+            lineHeight = 28.sp,
+            letterSpacing = (-0.2).sp
+        )
     }
 }
 
@@ -2028,7 +2368,7 @@ private fun LibraryTabId.displayTitle(): String =
         if (char.isLowerCase()) char.titlecase(Locale.getDefault()) else char.toString()
     }
 
-@OptIn(ExperimentalAnimationApi::class)
+@OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LibraryFoldersTab(
     folders: ImmutableList<MusicFolder>,

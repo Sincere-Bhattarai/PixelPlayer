@@ -83,6 +83,19 @@ class WearPlaybackController @Inject constructor(
         )
     )
 
+    suspend fun playItemAwaitDispatch(songId: String, requestId: String): Boolean {
+        return sendMessageToPhone(
+            path = WearDataPaths.PLAYBACK_COMMAND,
+            data = json.encodeToString(
+                WearPlaybackCommand(
+                    action = WearPlaybackCommand.PLAY_ITEM,
+                    songId = songId,
+                    requestId = requestId,
+                )
+            ).toByteArray(Charsets.UTF_8)
+        )
+    }
+
     fun playNextFromContext(songId: String, contextType: String, contextId: String?) = sendCommand(
         WearPlaybackCommand(
             action = WearPlaybackCommand.PLAY_NEXT_FROM_CONTEXT,
@@ -128,18 +141,19 @@ class WearPlaybackController @Inject constructor(
         )
     )
 
-    private suspend fun sendMessageToPhone(path: String, data: ByteArray) {
+    private suspend fun sendMessageToPhone(path: String, data: ByteArray): Boolean {
         try {
             val nodes = nodeClient.connectedNodes.await()
             if (nodes.isEmpty()) {
                 stateRepository.setPhoneConnected(false)
                 Timber.tag(TAG).w("No connected nodes found — phone not reachable (path=%s)", path)
-                return
+                return false
             }
             stateRepository.setPhoneConnected(true)
             stateRepository.setPhoneDeviceName(nodes.firstOrNull()?.displayName.orEmpty())
 
             // Send to all connected nodes (typically just one phone)
+            var delivered = false
             nodes.forEach { node ->
                 try {
                     Timber.tag(TAG).d(
@@ -150,6 +164,7 @@ class WearPlaybackController @Inject constructor(
                         node.displayName
                     )
                     messageClient.sendMessage(node.id, path, data).await()
+                    delivered = true
                     Timber.tag(TAG).d(
                         "Sent message path=%s nodeId=%s nodeName=%s",
                         path,
@@ -166,9 +181,14 @@ class WearPlaybackController @Inject constructor(
                     )
                 }
             }
+            if (!delivered) {
+                stateRepository.setPhoneConnected(false)
+            }
+            return delivered
         } catch (e: Exception) {
             stateRepository.setPhoneConnected(false)
             Timber.tag(TAG).e(e, "Failed to get connected nodes for path=%s", path)
+            return false
         }
     }
 }
