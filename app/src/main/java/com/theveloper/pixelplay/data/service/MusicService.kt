@@ -77,6 +77,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.data.service.auto.AutoMediaBrowseTree
+import com.theveloper.pixelplay.data.service.wear.buildWearThemePalette
 import com.theveloper.pixelplay.data.service.wear.WearStatePublisher
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 import com.theveloper.pixelplay.shared.WearIntents
@@ -1332,23 +1333,32 @@ class MusicService : MediaLibraryService() {
 
         val widgetColors = schemePair?.let {
             WidgetThemeColors(
-                lightSurfaceContainer = it.light.primaryContainer.toArgb(),
-                lightTitle = it.light.onPrimaryContainer.toArgb(),
-                lightArtist = it.light.onPrimaryContainer.copy(alpha = 0.7f).toArgb(),
+                lightSurfaceContainer = it.light.surfaceContainer.toArgb(),
+                lightSurfaceContainerLowest = it.light.surfaceContainerLowest.toArgb(),
+                lightSurfaceContainerLow = it.light.surfaceContainerLow.toArgb(),
+                lightSurfaceContainerHigh = it.light.surfaceContainerHigh.toArgb(),
+                lightSurfaceContainerHighest = it.light.surfaceContainerHighest.toArgb(),
+                lightTitle = it.light.onSurface.toArgb(),
+                lightArtist = it.light.onSurfaceVariant.toArgb(),
                 lightPlayPauseBackground = it.light.primary.toArgb(),
                 lightPlayPauseIcon = it.light.onPrimary.toArgb(),
                 lightPrevNextBackground = it.light.onPrimary.toArgb(),
                 lightPrevNextIcon = it.light.primary.toArgb(),
                 
-                darkSurfaceContainer = it.dark.primaryContainer.toArgb(),
-                darkTitle = it.dark.onPrimaryContainer.toArgb(),
-                darkArtist = it.dark.onPrimaryContainer.copy(alpha = 0.7f).toArgb(),
+                darkSurfaceContainer = it.dark.surfaceContainer.toArgb(),
+                darkSurfaceContainerLowest = it.dark.surfaceContainerLowest.toArgb(),
+                darkSurfaceContainerLow = it.dark.surfaceContainerLow.toArgb(),
+                darkSurfaceContainerHigh = it.dark.surfaceContainerHigh.toArgb(),
+                darkSurfaceContainerHighest = it.dark.surfaceContainerHighest.toArgb(),
+                darkTitle = it.dark.onSurface.toArgb(),
+                darkArtist = it.dark.onSurfaceVariant.toArgb(),
                 darkPlayPauseBackground = it.dark.primary.toArgb(),
                 darkPlayPauseIcon = it.dark.onPrimary.toArgb(),
                 darkPrevNextBackground = it.dark.onPrimary.toArgb(),
                 darkPrevNextIcon = it.dark.primary.toArgb()
             )
         }
+        val wearThemePalette = schemePair?.let { buildWearThemePalette(it.dark) }
 
         val isFavorite = isSongFavorite(mediaId)
 
@@ -1393,7 +1403,8 @@ class MusicService : MediaLibraryService() {
             queue = queueItems,
             themeColors = widgetColors,
             isShuffleEnabled = shuffleEnabled,
-            repeatMode = repeatMode
+            repeatMode = repeatMode,
+            wearThemePalette = wearThemePalette,
         )
     }
 

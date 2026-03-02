@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Watch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -32,10 +31,14 @@ import com.google.android.horologist.compose.layout.ScalingLazyColumn
 import com.google.android.horologist.compose.layout.rememberResponsiveColumnState
 import com.theveloper.pixelplay.data.WearOutputTarget
 import com.theveloper.pixelplay.presentation.components.AlwaysOnScalingPositionIndicator
+import com.theveloper.pixelplay.presentation.components.outputRouteIcon
 import com.theveloper.pixelplay.presentation.components.WearTopTimeText
 import com.theveloper.pixelplay.presentation.theme.LocalWearPalette
-import com.theveloper.pixelplay.presentation.theme.radialBackgroundBrush
+import com.theveloper.pixelplay.presentation.theme.screenBackgroundColor
+import com.theveloper.pixelplay.presentation.theme.surfaceContainerColor
+import com.theveloper.pixelplay.presentation.theme.surfaceContainerHighestColor
 import com.theveloper.pixelplay.presentation.viewmodel.WearPlayerViewModel
+import com.theveloper.pixelplay.shared.WearVolumeState
 
 @Composable
 fun OutputScreen(
@@ -43,11 +46,16 @@ fun OutputScreen(
 ) {
     val outputTarget by viewModel.outputTarget.collectAsState()
     val isPhoneConnected by viewModel.isPhoneConnected.collectAsState()
-    val isLocalPlaybackActive by viewModel.isLocalPlaybackActive.collectAsState()
+    val canCurrentSongPlayOnWatch by viewModel.canCurrentSongPlayOnWatch.collectAsState()
+    val playerState by viewModel.playerState.collectAsState()
+    val phoneVolumeState by viewModel.phoneVolumeState.collectAsState()
     val palette = LocalWearPalette.current
     val columnState = rememberResponsiveColumnState()
+    val phoneRouteType = phoneVolumeState.routeType.ifBlank { WearVolumeState.ROUTE_TYPE_PHONE }
+    val phoneRouteName = phoneVolumeState.routeName.ifBlank { "Phone" }
+    val canSwitchToWatch = canCurrentSongPlayOnWatch || outputTarget == WearOutputTarget.WATCH
 
-    val background = palette.radialBackgroundBrush()
+    val background = palette.screenBackgroundColor()
 
     Box(
         modifier = Modifier
@@ -73,17 +81,29 @@ fun OutputScreen(
             }
 
             item {
+                Text(
+                    text = "Available outputs",
+                    style = MaterialTheme.typography.caption2,
+                    color = palette.textSecondary.copy(alpha = 0.86f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                )
+            }
+
+            item {
                 OutputTargetChip(
                     label = "Phone",
                     subtitle = when {
-                        outputTarget == WearOutputTarget.PHONE && isPhoneConnected -> "Controlling now"
-                        outputTarget == WearOutputTarget.PHONE -> "Selected (disconnected)"
-                        isPhoneConnected -> "Control phone playback"
-                        else -> "Phone disconnected"
+                        !isPhoneConnected -> "Phone disconnected"
+                        outputTarget == WearOutputTarget.PHONE -> "Controlling · $phoneRouteName"
+                        playerState.songId.isBlank() -> "Switch to phone playback"
+                        else -> "Switch current song to $phoneRouteName"
                     },
-                    icon = Icons.Rounded.PhoneAndroid,
+                    icon = outputRouteIcon(phoneRouteType),
                     selected = outputTarget == WearOutputTarget.PHONE,
-                    enabled = true,
+                    enabled = isPhoneConnected,
                     onClick = { viewModel.selectOutput(WearOutputTarget.PHONE) },
                 )
             }
@@ -92,13 +112,15 @@ fun OutputScreen(
                 OutputTargetChip(
                     label = "Watch",
                     subtitle = when {
-                        outputTarget == WearOutputTarget.WATCH && isLocalPlaybackActive -> "Controlling now"
-                        isLocalPlaybackActive -> "Control local watch playback"
-                        else -> "Play a local song first"
+                        outputTarget == WearOutputTarget.WATCH && playerState.isPlaying -> "Playing on watch"
+                        outputTarget == WearOutputTarget.WATCH -> "Watch selected"
+                        canSwitchToWatch -> "Switch current song to watch"
+                        playerState.songId.isBlank() -> "Play a song first"
+                        else -> "Save this song on watch first"
                     },
                     icon = Icons.Rounded.Watch,
                     selected = outputTarget == WearOutputTarget.WATCH,
-                    enabled = isLocalPlaybackActive,
+                    enabled = canSwitchToWatch,
                     onClick = { viewModel.selectOutput(WearOutputTarget.WATCH) },
                 )
             }
@@ -130,17 +152,17 @@ private fun OutputTargetChip(
 ) {
     val palette = LocalWearPalette.current
     val containerColor = when {
-        !enabled -> palette.controlDisabledContainer
+        !enabled -> palette.surfaceContainerHighestColor()
         selected -> palette.controlContainer.copy(alpha = 0.95f)
-        else -> palette.chipContainer
+        else -> palette.surfaceContainerColor()
     }
     val contentColor = when {
-        !enabled -> palette.controlDisabledContent
+        !enabled -> palette.textSecondary
         selected -> palette.controlContent
         else -> palette.textPrimary
     }
     val secondaryColor = when {
-        !enabled -> palette.controlDisabledContent.copy(alpha = 0.90f)
+        !enabled -> palette.textSecondary.copy(alpha = 0.82f)
         selected -> palette.controlContent.copy(alpha = 0.76f)
         else -> palette.textSecondary.copy(alpha = 0.80f)
     }

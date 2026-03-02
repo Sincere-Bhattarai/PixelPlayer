@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.worker.SyncProgress
@@ -755,6 +756,11 @@ fun GeminiSystemPromptItem(
     val hasChanges = localPrompt != systemPrompt
     val isDefault = systemPrompt == defaultPrompt
     var showSaved by remember { mutableStateOf(false) }
+    val presets = listOf(
+        "Balanced" to "You are a helpful AI assistant inside a music player app. Build playlists that match the user request first, then optimize flow and variety. Prefer familiar tracks with a small discovery ratio and avoid repetitive artist clustering.",
+        "Creative" to "You are a creative playlist curator. Follow the user request, but add tasteful surprises and deeper cuts when they still fit the mood. Keep transitions smooth and diversify artists, tempos, and eras.",
+        "Precise" to "You are a strict music recommendation assistant. Prioritize exact prompt matching, minimize weak matches, and keep results consistent with requested genres, mood, and activity. Return concise, deterministic selections over novelty."
+    )
 
     LaunchedEffect(showSaved) {
         if (showSaved) {
@@ -778,6 +784,26 @@ fun GeminiSystemPromptItem(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Preset Prompts",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                presets.forEach { preset ->
+                    OutlinedButton(
+                        onClick = { localPrompt = preset.second },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(text = preset.first, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = localPrompt,

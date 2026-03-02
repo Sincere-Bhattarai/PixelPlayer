@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.theveloper.pixelplay.data.local.LocalSongDao
 import com.theveloper.pixelplay.data.local.LocalSongEntity
+import com.theveloper.pixelplay.shared.WearThemePalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
@@ -64,6 +66,7 @@ class WearLocalPlayerRepository @Inject constructor(
     private val localSongDao: LocalSongDao,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val json = Json { ignoreUnknownKeys = true }
     private var exoPlayer: ExoPlayer? = null
 
     private val _localPlayerState = MutableStateFlow(WearLocalPlayerState())
@@ -75,10 +78,14 @@ class WearLocalPlayerRepository @Inject constructor(
     private val _localPaletteSeedArgb = MutableStateFlow<Int?>(null)
     val localPaletteSeedArgb: StateFlow<Int?> = _localPaletteSeedArgb.asStateFlow()
 
+    private val _localThemePalette = MutableStateFlow<WearThemePalette?>(null)
+    val localThemePalette: StateFlow<WearThemePalette?> = _localThemePalette.asStateFlow()
+
     private val _localAlbumArt = MutableStateFlow<Bitmap?>(null)
     val localAlbumArt: StateFlow<Bitmap?> = _localAlbumArt.asStateFlow()
 
     private var positionUpdateJob: Job? = null
+    private var currentQueueSongIds: List<String> = emptyList()
     private var currentQueueSongsById: Map<String, LocalSongEntity> = emptyMap()
     private var currentQueueItemsById: Map<String, WearQueueSong> = emptyMap()
     private var lastPaletteSongId: String = ""
@@ -168,14 +175,14 @@ class WearLocalPlayerRepository @Inject constructor(
     ) {
         withContext(Dispatchers.Main) {
             val player = getOrCreatePlayer()
+            currentQueueSongIds = queueSongs.map { it.songId }
             currentQueueSongsById = queueSongIdToLocal
             currentQueueItemsById = queueSongs.associateBy { it.songId }
-            if (queueSongIdToLocal.isEmpty()) {
-                lastPaletteSongId = ""
-                lastArtworkSongId = ""
-                _localPaletteSeedArgb.value = null
-                _localAlbumArt.value = null
-            }
+            lastPaletteSongId = ""
+            lastArtworkSongId = ""
+            _localThemePalette.value = null
+            _localPaletteSeedArgb.value = null
+            _localAlbumArt.value = null
 
             val mediaItems = queueSongs.map { song ->
                 MediaItem.Builder()
@@ -233,6 +240,33 @@ class WearLocalPlayerRepository @Inject constructor(
         exoPlayer?.seekTo(positionMs)
     }
 
+    suspend fun removeSongFromActiveQueue(songId: String) {
+        withContext(Dispatchers.Main) {
+            val queueIndex = currentQueueSongIds.indexOf(songId)
+            if (queueIndex == -1) return@withContext
+
+            val player = exoPlayer
+            if (player == null || currentQueueSongIds.size <= 1) {
+                release()
+                return@withContext
+            }
+
+            player.removeMediaItem(queueIndex)
+            currentQueueSongIds = currentQueueSongIds.toMutableList().apply {
+                removeAt(queueIndex)
+            }
+            currentQueueSongsById = currentQueueSongsById.toMutableMap().apply {
+                remove(songId)
+            }
+            currentQueueItemsById = currentQueueItemsById.toMutableMap().apply {
+                remove(songId)
+            }
+            if (lastPaletteSongId == songId) lastPaletteSongId = ""
+            if (lastArtworkSongId == songId) lastArtworkSongId = ""
+            updateState()
+        }
+    }
+
     /**
      * Stop local playback and release the player.
      */
@@ -242,8 +276,10 @@ class WearLocalPlayerRepository @Inject constructor(
         exoPlayer = null
         _isLocalPlaybackActive.value = false
         _localPlayerState.value = WearLocalPlayerState()
+        _localThemePalette.value = null
         _localPaletteSeedArgb.value = null
         _localAlbumArt.value = null
+        currentQueueSongIds = emptyList()
         currentQueueSongsById = emptyMap()
         currentQueueItemsById = emptyMap()
         lastPaletteSongId = ""
@@ -285,6 +321,7 @@ class WearLocalPlayerRepository @Inject constructor(
     private fun updatePaletteForSong(songId: String) {
         if (songId.isBlank()) {
             lastPaletteSongId = ""
+            _localThemePalette.value = null
             _localPaletteSeedArgb.value = null
             return
         }
@@ -292,12 +329,23 @@ class WearLocalPlayerRepository @Inject constructor(
         lastPaletteSongId = songId
 
         val queueSong = currentQueueSongsById[songId]
+        val cachedThemePalette = queueSong?.themePaletteJson
+            ?.takeIf { it.isNotBlank() }
+            ?.let { encodedPalette ->
+                runCatching { json.decodeFromString<WearThemePalette>(encodedPalette) }
+                    .onFailure { error ->
+                        Timber.tag(TAG).w(error, "Failed to decode persisted Wear palette")
+                    }
+                    .getOrNull()
+            }
         val cachedSeed = queueSong?.paletteSeedArgb
-        if (cachedSeed != null) {
+        _localThemePalette.value = cachedThemePalette
+        if (cachedThemePalette != null || cachedSeed != null) {
             _localPaletteSeedArgb.value = cachedSeed
             return
         }
 
+        _localThemePalette.value = null
         _localPaletteSeedArgb.value = null
         if (queueSong != null) {
             scope.launch(Dispatchers.IO) {
@@ -327,6 +375,7 @@ class WearLocalPlayerRepository @Inject constructor(
             val extractedSeed = extractSeedFromUri(queueItem.uri, queueItem.songId)
             withContext(Dispatchers.Main) {
                 if (lastPaletteSongId != queueItem.songId) return@withContext
+                _localThemePalette.value = null
                 _localPaletteSeedArgb.value = extractedSeed
             }
         }
