@@ -7,7 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -102,6 +101,7 @@ fun SongInfoBottomSheet(
     val context = LocalContext.current
     var showEditSheet by remember { mutableStateOf(false) }
     val isPixelPlayWatchAvailable by songInfoViewModel.isPixelPlayWatchAvailable.collectAsState()
+    val isWatchAvailabilityResolved by songInfoViewModel.isWatchAvailabilityResolved.collectAsState()
     val isSendingToWatch by songInfoViewModel.isSendingToWatch.collectAsState()
     val activeWatchTransfer by songInfoViewModel.activeWatchTransfer.collectAsState()
     val watchSongIds by songInfoViewModel.watchSongIds.collectAsState()
@@ -114,8 +114,18 @@ fun SongInfoBottomSheet(
         songInfoViewModel.isLocalSongForWatchTransfer(song)
     }
 
-    LaunchedEffect(song.id) {
+    LaunchedEffect(songInfoViewModel) {
         songInfoViewModel.refreshWatchAvailability()
+    }
+
+    val shouldOfferWatchTransfer = remember(canSendToWatch, isSongSavedOnWatch) {
+        canSendToWatch && !isSongSavedOnWatch
+    }
+    var keepWatchTransferSlotStable by remember(song.id) { mutableStateOf(false) }
+    LaunchedEffect(shouldOfferWatchTransfer, isWatchAvailabilityResolved) {
+        if (shouldOfferWatchTransfer && !isWatchAvailabilityResolved) {
+            keepWatchTransferSlotStable = true
+        }
     }
 
     val evenCornerRadiusElems = 26.dp
@@ -191,17 +201,11 @@ fun SongInfoBottomSheet(
     ) {
         Box(
             modifier = Modifier
-                .animateContentSize(
-                    animationSpec = tween(durationMillis = 200),
-                    alignment = Alignment.BottomCenter
-                )
                 .fillMaxWidth(),
             contentAlignment = Alignment.TopCenter
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateContentSize(animationSpec = tween(durationMillis = 200))
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier
@@ -448,25 +452,44 @@ fun SongInfoBottomSheet(
                                     }
                                 }
 
-                                if (isPixelPlayWatchAvailable && canSendToWatch && !isSongSavedOnWatch) {
+                                val shouldRenderWatchTransferRow = shouldOfferWatchTransfer && (
+                                    !isWatchAvailabilityResolved ||
+                                        isPixelPlayWatchAvailable ||
+                                        keepWatchTransferSlotStable
+                                    )
+                                if (shouldRenderWatchTransferRow) {
                                     item {
                                         FilledTonalButton(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .heightIn(min = 66.dp),
                                             colors = ButtonDefaults.filledTonalButtonColors(
-                                                containerColor = sendToWatchContainerColor,
-                                                contentColor = sendToWatchContentColor
+                                                containerColor = if (isPixelPlayWatchAvailable) {
+                                                    sendToWatchContainerColor
+                                                } else {
+                                                    MaterialTheme.colorScheme.surfaceContainerHigh
+                                                },
+                                                contentColor = if (isPixelPlayWatchAvailable) {
+                                                    sendToWatchContentColor
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                             ),
                                             shape = CircleShape,
-                                            enabled = !isSendingToWatch,
+                                            enabled = isPixelPlayWatchAvailable && !isSendingToWatch,
                                             onClick = {
                                                 songInfoViewModel.sendSongToWatch(song) { message ->
                                                     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                                                 }
                                             }
                                         ) {
-                                            if (isSendingToWatch) {
+                                            if (!isWatchAvailabilityResolved) {
+                                                LoadingIndicator(modifier = Modifier.size(18.dp))
+                                                Spacer(Modifier.width(10.dp))
+                                                Text("Checking Watch")
+                                            } else if (isSendingToWatch) {
                                                 LoadingIndicator(modifier = Modifier.size(18.dp))
                                                 Spacer(Modifier.width(10.dp))
                                                 Text(
@@ -481,10 +504,20 @@ fun SongInfoBottomSheet(
                                             } else {
                                                 Icon(
                                                     painter = painterResource(R.drawable.rounded_watch_arrow_down_24),
-                                                    contentDescription = "Send song to watch"
+                                                    contentDescription = if (isPixelPlayWatchAvailable) {
+                                                        "Send song to watch"
+                                                    } else {
+                                                        "Watch unavailable"
+                                                    }
                                                 )
                                                 Spacer(Modifier.width(8.dp))
-                                                Text("Send to Watch")
+                                                Text(
+                                                    if (isPixelPlayWatchAvailable) {
+                                                        "Send to Watch"
+                                                    } else {
+                                                        "Watch unavailable"
+                                                    }
+                                                )
                                             }
                                         }
                                     }

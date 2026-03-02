@@ -28,6 +28,9 @@ class SongInfoBottomSheetViewModel @Inject constructor(
 
     private val _isPixelPlayWatchAvailable = MutableStateFlow(false)
     val isPixelPlayWatchAvailable: StateFlow<Boolean> = _isPixelPlayWatchAvailable.asStateFlow()
+    private val _isWatchAvailabilityResolved = MutableStateFlow(false)
+    val isWatchAvailabilityResolved: StateFlow<Boolean> = _isWatchAvailabilityResolved.asStateFlow()
+    private val _isRefreshingWatchAvailability = MutableStateFlow(false)
 
     private val _isRequestingToWatch = MutableStateFlow(false)
     val watchTransfers: StateFlow<Map<String, PhoneWatchTransferState>> = transferStateStore.transfers
@@ -56,9 +59,14 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     )
 
     fun refreshWatchAvailability() {
+        if (_isRefreshingWatchAvailability.value) return
+
         viewModelScope.launch {
+            _isRefreshingWatchAvailability.value = true
             val available = wearPhoneTransferSender.isPixelPlayWatchAvailable()
             _isPixelPlayWatchAvailable.value = available
+            _isWatchAvailabilityResolved.value = true
+            _isRefreshingWatchAvailability.value = false
             if (available) {
                 wearPhoneTransferSender.refreshWatchLibraryState()
             }
