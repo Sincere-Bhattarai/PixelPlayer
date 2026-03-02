@@ -21,6 +21,8 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -149,12 +151,12 @@ class PlaybackStatsRepository @Inject constructor(
         val peakDayDurationMs: Long
     )
 
-    fun recordPlayback(
+    suspend fun recordPlayback(
         songId: String,
         durationMs: Long,
         timestamp: Long = System.currentTimeMillis()
-    ) {
-        if (songId.isBlank()) return
+    ) = withContext(Dispatchers.IO) {
+        if (songId.isBlank()) return@withContext
         val coercedTimestamp = timestamp.coerceAtLeast(0L)
         val coercedDuration = durationMs.coerceAtLeast(0L)
         val start = (coercedTimestamp - coercedDuration).coerceAtLeast(0L)
@@ -176,11 +178,11 @@ class PlaybackStatsRepository @Inject constructor(
         }
     }
 
-    fun loadSummary(
+    suspend fun loadSummary(
         range: StatsTimeRange,
         songs: List<Song>,
         nowMillis: Long = System.currentTimeMillis()
-    ): PlaybackStatsSummary {
+    ): PlaybackStatsSummary = withContext(Dispatchers.IO) {
         val zoneId = ZoneId.systemDefault()
         val allEvents = readEvents()
         val (startBound, endBound) = range.resolveBounds(allEvents, nowMillis, zoneId)
@@ -394,7 +396,7 @@ class PlaybackStatsRepository @Inject constructor(
             endBound = endBound
         )
 
-        return PlaybackStatsSummary(
+        PlaybackStatsSummary(
             range = range,
             startTimestamp = startBound,
             endTimestamp = endBound,
@@ -421,14 +423,16 @@ class PlaybackStatsRepository @Inject constructor(
         )
     }
 
-    fun exportEventsForBackup(): List<PlaybackEvent> = synchronized(fileLock) {
+    suspend fun exportEventsForBackup(): List<PlaybackEvent> = withContext(Dispatchers.IO) {
+        synchronized(fileLock) {
         readEventsLocked().map { event -> sanitizeEvent(event) }
+        }
     }
 
-    fun loadPlaybackHistory(limit: Int = DEFAULT_PLAYBACK_HISTORY_LIMIT): List<PlaybackHistoryEntry> {
-        if (limit <= 0) return emptyList()
+    suspend fun loadPlaybackHistory(limit: Int = DEFAULT_PLAYBACK_HISTORY_LIMIT): List<PlaybackHistoryEntry> = withContext(Dispatchers.IO) {
+        if (limit <= 0) return@withContext emptyList()
         val safeLimit = limit.coerceAtMost(MAX_PLAYBACK_HISTORY_LIMIT)
-        return readEvents()
+        readEvents()
             .asSequence()
             .sortedByDescending { event -> event.timestamp }
             .take(safeLimit)
@@ -441,10 +445,10 @@ class PlaybackStatsRepository @Inject constructor(
             .toList()
     }
 
-    fun importEventsFromBackup(
+    suspend fun importEventsFromBackup(
         events: List<PlaybackEvent>,
         clearExisting: Boolean = true
-    ) {
+    ) = withContext(Dispatchers.IO) {
         synchronized(fileLock) {
             val base = if (clearExisting) {
                 emptyList()

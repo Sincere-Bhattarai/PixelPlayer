@@ -7,7 +7,8 @@ import kotlinx.serialization.Transient // Para campos que no queremos serializar
 @Serializable
 data class QueueItem(
     val id: Long, // ID único de la canción
-    val albumArtBitmapData: ByteArray?
+    val albumArtBitmapData: ByteArray?,
+    val albumArtUri: String? = null
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -16,6 +17,7 @@ data class QueueItem(
         other as QueueItem
 
         if (id != other.id) return false
+        if (albumArtUri != other.albumArtUri) return false
         if (albumArtBitmapData != null) {
             if (other.albumArtBitmapData == null) return false
             if (!albumArtBitmapData.contentEquals(other.albumArtBitmapData)) return false
@@ -26,6 +28,7 @@ data class QueueItem(
 
     override fun hashCode(): Int {
         var result = id.hashCode()
+        result = 31 * result + (albumArtUri?.hashCode() ?: 0)
         result = 31 * result + (albumArtBitmapData?.contentHashCode() ?: 0)
         return result
     }
@@ -93,6 +96,7 @@ data class PlayerInfo(
         } else if (other.albumArtBitmapData != null) return false
         if (currentPositionMs != other.currentPositionMs) return false
         if (totalDurationMs != other.totalDurationMs) return false
+        if (isFavorite != other.isFavorite) return false
         if (queue != other.queue) return false
         if (lyrics != other.lyrics) return false
         if (isLoadingLyrics != other.isLoadingLyrics) return false
@@ -112,6 +116,7 @@ data class PlayerInfo(
         result = 31 * result + (albumArtBitmapData?.contentHashCode() ?: 0)
         result = 31 * result + currentPositionMs.hashCode()
         result = 31 * result + totalDurationMs.hashCode()
+        result = 31 * result + isFavorite.hashCode()
         result = 31 * result + queue.hashCode()
         result = 31 * result + (lyrics?.hashCode() ?: 0)
         result = 31 * result + isLoadingLyrics.hashCode()

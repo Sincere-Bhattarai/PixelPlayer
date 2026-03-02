@@ -1860,10 +1860,7 @@ fun QueuePlaylistSongItem(
         label = "elevationAnimation"
     )
 
-    val backgroundColor by animateColorAsState(
-        targetValue = if (isCurrentSong) colors.surfaceContainerLowest else colors.surfaceContainerLowest,
-        label = "backgroundColorAnimation"
-    )
+    val backgroundColor = colors.surfaceContainerLowest
     val mvContainerColor = if (isCurrentSong) colors.tertiaryContainer else colors.surfaceContainerHigh
     val mvContentColor = if (isCurrentSong) colors.onTertiaryContainer else colors.onSurface
     val hapticView = LocalView.current
@@ -1912,11 +1909,7 @@ fun QueuePlaylistSongItem(
         animationSpec = tween(durationMillis = 120),
         label = "dismissIconScale"
     )
-    val dismissIconRotation by animateFloatAsState(
-        targetValue = 0f,
-        animationSpec = tween(durationMillis = 120),
-        label = "dismissIconRotation"
-    )
+    val dismissIconRotation = 0f
 
     // Track the actual rendered height of the Surface (foreground item) to size the background exactly.
     var surfaceHeightPx by remember { mutableStateOf(0f) }

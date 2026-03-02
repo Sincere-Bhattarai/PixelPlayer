@@ -31,8 +31,9 @@ import androidx.media3.session.SessionCommand
 import androidx.core.content.ContextCompat
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.ThemePreference
-import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.ThemePreferencesRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.data.service.MusicService
 import com.theveloper.pixelplay.data.service.MusicNotificationProvider
@@ -88,7 +89,8 @@ import kotlin.coroutines.resume
 class WearCommandReceiver : WearableListenerService() {
 
     @Inject lateinit var musicRepository: MusicRepository
-    @Inject lateinit var userPreferencesRepository: UserPreferencesRepository
+    @Inject lateinit var themePreferencesRepository: ThemePreferencesRepository
+    @Inject lateinit var playlistPreferencesRepository: PlaylistPreferencesRepository
     @Inject lateinit var dualPlayerEngine: DualPlayerEngine
     @Inject lateinit var colorSchemeProcessor: ColorSchemeProcessor
     @Inject lateinit var transferStateStore: PhoneWatchTransferStateStore
@@ -708,7 +710,7 @@ class WearCommandReceiver : WearableListenerService() {
             }
             "playlist" -> {
                 val playlistId = contextId ?: return emptyList()
-                val playlist = userPreferencesRepository.userPlaylistsFlow.first()
+                val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                     .find { it.id == playlistId } ?: return emptyList()
                 val songs = musicRepository.getSongsByIds(playlist.songIds).first()
                 // Maintain playlist order
@@ -852,7 +854,7 @@ class WearCommandReceiver : WearableListenerService() {
             }
 
             WearBrowseRequest.PLAYLISTS -> {
-                userPreferencesRepository.userPlaylistsFlow.first()
+                playlistPreferencesRepository.userPlaylistsFlow.first()
                     .map { playlist ->
                         WearLibraryItem(
                             id = playlist.id,
@@ -896,7 +898,7 @@ class WearCommandReceiver : WearableListenerService() {
             WearBrowseRequest.PLAYLIST_SONGS -> {
                 val playlistId = contextId
                     ?: throw IllegalArgumentException("Missing playlistId for PLAYLIST_SONGS")
-                val playlist = userPreferencesRepository.userPlaylistsFlow.first()
+                val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                     .find { it.id == playlistId }
                     ?: throw IllegalArgumentException("Playlist not found: $playlistId")
                 val songs = musicRepository.getSongsByIds(playlist.songIds).first()
@@ -1449,14 +1451,14 @@ class WearCommandReceiver : WearableListenerService() {
     }
 
     private suspend fun resolveTransferThemePalette(song: Song): WearThemePalette? {
-        val playerTheme = userPreferencesRepository.playerThemePreferenceFlow.first()
+        val playerTheme = themePreferencesRepository.playerThemePreferenceFlow.first()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && playerTheme == ThemePreference.DYNAMIC) {
             return buildWearThemePalette(dynamicDarkColorScheme(this))
         }
 
         val artUriString = song.albumArtUriString?.takeIf { it.isNotBlank() } ?: return null
         val paletteStyle = AlbumArtPaletteStyle.fromStorageKey(
-            userPreferencesRepository.albumArtPaletteStyleFlow.first().storageKey
+            themePreferencesRepository.albumArtPaletteStyleFlow.first().storageKey
         )
         val schemePair = colorSchemeProcessor.getOrGenerateColorScheme(artUriString, paletteStyle)
             ?: return null

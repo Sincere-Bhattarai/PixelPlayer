@@ -6,14 +6,11 @@ import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.util.LruCache
 import androidx.core.app.NotificationCompat
-import androidx.core.graphics.drawable.toBitmap
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.media3.common.C
@@ -30,9 +27,6 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
-import coil.imageLoader
-import coil.request.ImageRequest
-import coil.size.Size
 import com.google.android.gms.cast.MediaMetadata as CastMediaMetadata
 import com.google.android.gms.cast.MediaStatus
 import com.google.android.gms.cast.framework.CastContext
@@ -46,6 +40,8 @@ import com.google.common.util.concurrent.SettableFuture
 import com.theveloper.pixelplay.PixelPlayApplication
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.PlayerInfo
+import com.theveloper.pixelplay.data.preferences.EqualizerPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.ThemePreferencesRepository
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.data.service.player.DualPlayerEngine
@@ -65,7 +61,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import java.io.ByteArrayOutputStream
 import com.theveloper.pixelplay.data.equalizer.EqualizerManager
 import com.theveloper.pixelplay.data.model.WidgetThemeColors
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
@@ -101,6 +96,10 @@ class MusicService : MediaLibraryService() {
     lateinit var musicRepository: MusicRepository
     @Inject
     lateinit var userPreferencesRepository: UserPreferencesRepository
+    @Inject
+    lateinit var equalizerPreferencesRepository: EqualizerPreferencesRepository
+    @Inject
+    lateinit var themePreferencesRepository: ThemePreferencesRepository
     @Inject
     lateinit var equalizerManager: EqualizerManager
     @Inject
@@ -223,15 +222,15 @@ class MusicService : MediaLibraryService() {
         // Restore equalizer state from preferences and attach to audio session.
         // This ensures the equalizer is active even before the user opens the EQ screen.
         serviceScope.launch {
-            val eqEnabled = userPreferencesRepository.equalizerEnabledFlow.first()
-            val presetName = userPreferencesRepository.equalizerPresetFlow.first()
-            val customBands = userPreferencesRepository.equalizerCustomBandsFlow.first()
-            val bassBoostEnabled = userPreferencesRepository.bassBoostEnabledFlow.first()
-            val bassBoostStrength = userPreferencesRepository.bassBoostStrengthFlow.first()
-            val virtualizerEnabled = userPreferencesRepository.virtualizerEnabledFlow.first()
-            val virtualizerStrength = userPreferencesRepository.virtualizerStrengthFlow.first()
-            val loudnessEnabled = userPreferencesRepository.loudnessEnhancerEnabledFlow.first()
-            val loudnessStrength = userPreferencesRepository.loudnessEnhancerStrengthFlow.first()
+            val eqEnabled = equalizerPreferencesRepository.equalizerEnabledFlow.first()
+            val presetName = equalizerPreferencesRepository.equalizerPresetFlow.first()
+            val customBands = equalizerPreferencesRepository.equalizerCustomBandsFlow.first()
+            val bassBoostEnabled = equalizerPreferencesRepository.bassBoostEnabledFlow.first()
+            val bassBoostStrength = equalizerPreferencesRepository.bassBoostStrengthFlow.first()
+            val virtualizerEnabled = equalizerPreferencesRepository.virtualizerEnabledFlow.first()
+            val virtualizerStrength = equalizerPreferencesRepository.virtualizerStrengthFlow.first()
+            val loudnessEnabled = equalizerPreferencesRepository.loudnessEnhancerEnabledFlow.first()
+            val loudnessStrength = equalizerPreferencesRepository.loudnessEnhancerStrengthFlow.first()
 
             equalizerManager.restoreState(
                 eqEnabled, presetName, customBands,
@@ -596,9 +595,9 @@ class MusicService : MediaLibraryService() {
         requestWidgetFullUpdate(force = true)
 
         serviceScope.launch {
-            userPreferencesRepository.favoriteSongIdsFlow.collect { ids ->
+            musicRepository.getFavoriteSongIdsFlow().collect { ids ->
                 Timber.tag("MusicService")
-                    .d("favoriteSongIdsFlow collected. New ids size: ${ids.size}")
+                    .d("favoriteSongIdsFlow(Room) collected. New ids size: ${ids.size}")
                 val oldIds = favoriteSongIds
                 favoriteSongIds = ids
                 val currentSongId = mediaSession?.player?.currentMediaItem?.mediaId
@@ -761,7 +760,12 @@ class MusicService : MediaLibraryService() {
                     val songId = player.currentMediaItem?.mediaId
                     if (!songId.isNullOrBlank()) {
                         serviceScope.launch {
-                            userPreferencesRepository.toggleFavoriteSong(songId)
+                            val updatedFavorite = musicRepository.toggleFavoriteStatus(songId)
+                            favoriteSongIds = if (updatedFavorite) {
+                                favoriteSongIds + songId
+                            } else {
+                                favoriteSongIds - songId
+                            }
                             mediaSession?.let { refreshMediaSessionUi(it) }
                             requestWidgetFullUpdate(force = true)
                         }
@@ -1306,8 +1310,8 @@ class MusicService : MediaLibraryService() {
         // Merge two IO preference reads into a single context switch
         val (playerTheme, paletteStyle) = withContext(Dispatchers.IO) {
             Pair(
-                userPreferencesRepository.playerThemePreferenceFlow.first(),
-                AlbumArtPaletteStyle.fromStorageKey(userPreferencesRepository.albumArtPaletteStyleFlow.first().storageKey)
+                themePreferencesRepository.playerThemePreferenceFlow.first(),
+                AlbumArtPaletteStyle.fromStorageKey(themePreferencesRepository.albumArtPaletteStyleFlow.first().storageKey)
             )
         }
 
@@ -1377,14 +1381,11 @@ class MusicService : MediaLibraryService() {
                 val mediaItem = window.mediaItem
                 val songId = mediaItem.mediaId.toLongOrNull()
                 if (songId != null) {
-                    val (artBytes, _) = getAlbumArtForWidget(
-                        embeddedArt = mediaItem.mediaMetadata?.artworkData,
-                        artUri = mediaItem.mediaMetadata?.artworkUri
-                    )
                     queueItems.add(
                         com.theveloper.pixelplay.data.model.QueueItem(
                             id = songId,
-                            albumArtBitmapData = artBytes
+                            albumArtBitmapData = null,
+                            albumArtUri = mediaItem.mediaMetadata?.artworkUri?.toString()
                         )
                     )
                 }
@@ -1408,32 +1409,17 @@ class MusicService : MediaLibraryService() {
         )
     }
 
-    private val widgetArtByteArrayCache = object : LruCache<String, ByteArray>(5 * 256 * 1024) {
-        override fun sizeOf(key: String, value: ByteArray): Int = value.size
-    }
-
-    private val widgetArtFallbackSizePx = 1024
-
     // Color scheme cache: skip recomputation when art URI and palette style haven't changed
     private var cachedSchemeArtUri: String? = null
     private var cachedSchemePaletteStyle: AlbumArtPaletteStyle? = null
     private var cachedColorSchemePair: ColorSchemePair? = null
 
     private suspend fun getAlbumArtForWidget(embeddedArt: ByteArray?, artUri: Uri?): Pair<ByteArray?, String?> = withContext(Dispatchers.IO) {
-        if (embeddedArt != null && embeddedArt.isNotEmpty()) {
-            return@withContext embeddedArt to artUri?.toString()
-        }
-        val uri = artUri ?: return@withContext null to null
-        val artUriString = uri.toString()
-        val cachedArt = widgetArtByteArrayCache.get(artUriString)
-        if (cachedArt != null) {
-            return@withContext cachedArt to artUriString
-        }
-        val loadedArt = loadBitmapDataFromUri(uri = uri, context = baseContext)
-        if (loadedArt != null) {
-            widgetArtByteArrayCache.put(artUriString, loadedArt)
-        }
-        return@withContext loadedArt to artUriString
+        val artUriString = artUri?.toString()
+        // Prefer URI-driven lazy loading in widgets/wear publisher.
+        // Keep embedded bytes only when no URI is available.
+        val embedded = if (artUriString == null) embeddedArt?.takeIf { it.isNotEmpty() } else null
+        return@withContext embedded to artUriString
     }
 
     private suspend fun updateGlanceWidgets(playerInfo: PlayerInfo) = withContext(Dispatchers.IO) {
@@ -1471,38 +1457,6 @@ class MusicService : MediaLibraryService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error al actualizar el widget", e)
-        }
-    }
-
-    private suspend fun loadBitmapDataFromUri(context: Context, uri: Uri): ByteArray? = withContext(Dispatchers.IO) {
-        try {
-            val request = ImageRequest.Builder(context)
-                .data(uri)
-                .size(Size(widgetArtFallbackSizePx, widgetArtFallbackSizePx))
-                .allowHardware(false)
-                .build()
-            val drawable = context.imageLoader.execute(request).drawable
-            drawable?.let {
-                val sourceWidth = it.intrinsicWidth.takeIf { w -> w > 0 } ?: widgetArtFallbackSizePx
-                val sourceHeight = it.intrinsicHeight.takeIf { h -> h > 0 } ?: widgetArtFallbackSizePx
-                val targetWidth = minOf(sourceWidth, widgetArtFallbackSizePx)
-                val targetHeight = minOf(sourceHeight, widgetArtFallbackSizePx)
-                val bitmap = it.toBitmap(targetWidth, targetHeight)
-                val stream = ByteArrayOutputStream()
-                // Do NOT recycle bitmap here: toBitmap() may return Coil's cached Bitmap
-                // object directly. Recycling it would invalidate any copy already handed
-                // to Media3, causing "Can't copy a recycled bitmap" on setMetadata().
-                // Coil manages the lifecycle of its own cached bitmaps.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, stream)
-                } else {
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
-                }
-                stream.toByteArray()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Fallo al cargar bitmap desde URI: $uri", e)
-            null
         }
     }
 
@@ -1634,7 +1588,6 @@ class MusicService : MediaLibraryService() {
             Timber.tag("MusicService")
                 .d("Applying favorite=$targetFavoriteState for songId: $songId")
             musicRepository.setFavoriteStatus(songId, targetFavoriteState)
-            userPreferencesRepository.setFavoriteSong(songId, targetFavoriteState)
             refreshMediaSessionUi(session)
             requestWidgetFullUpdate(force = true)
         }

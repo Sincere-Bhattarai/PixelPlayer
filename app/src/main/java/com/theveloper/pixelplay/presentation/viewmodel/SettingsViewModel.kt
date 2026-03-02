@@ -17,10 +17,12 @@ import com.theveloper.pixelplay.data.preferences.CarouselStyle
 import com.theveloper.pixelplay.data.preferences.LibraryNavigationMode
 import com.theveloper.pixelplay.data.preferences.ThemePreference
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.AiPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.AlbumArtQuality
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
 import com.theveloper.pixelplay.data.preferences.CollagePattern
 import com.theveloper.pixelplay.data.preferences.FullPlayerLoadingTweaks
+import com.theveloper.pixelplay.data.preferences.ThemePreferencesRepository
 import com.theveloper.pixelplay.data.repository.LyricsRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.data.model.LyricsSourcePreference
@@ -146,6 +148,8 @@ private sealed interface SettingsUiUpdate {
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val aiPreferencesRepository: AiPreferencesRepository,
+    private val themePreferencesRepository: ThemePreferencesRepository,
     private val syncManager: SyncManager,
     private val aiClientFactory: AiClientFactory,
     private val lyricsRepository: LyricsRepository,
@@ -157,26 +161,26 @@ class SettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
-    val geminiApiKey: StateFlow<String> = userPreferencesRepository.geminiApiKey
+    val geminiApiKey: StateFlow<String> = aiPreferencesRepository.geminiApiKey
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-    val geminiModel: StateFlow<String> = userPreferencesRepository.geminiModel
+    val geminiModel: StateFlow<String> = aiPreferencesRepository.geminiModel
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-    val geminiSystemPrompt: StateFlow<String> = userPreferencesRepository.geminiSystemPrompt
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UserPreferencesRepository.DEFAULT_SYSTEM_PROMPT)
+    val geminiSystemPrompt: StateFlow<String> = aiPreferencesRepository.geminiSystemPrompt
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AiPreferencesRepository.DEFAULT_SYSTEM_PROMPT)
 
-    val deepseekSystemPrompt: StateFlow<String> = userPreferencesRepository.deepseekSystemPrompt
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UserPreferencesRepository.DEFAULT_DEEPSEEK_SYSTEM_PROMPT)
+    val deepseekSystemPrompt: StateFlow<String> = aiPreferencesRepository.deepseekSystemPrompt
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AiPreferencesRepository.DEFAULT_DEEPSEEK_SYSTEM_PROMPT)
     
     // AI Provider Settings
-    val aiProvider: StateFlow<String> = userPreferencesRepository.aiProvider
+    val aiProvider: StateFlow<String> = aiPreferencesRepository.aiProvider
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "GEMINI")
     
-    val deepseekApiKey: StateFlow<String> = userPreferencesRepository.deepseekApiKey
+    val deepseekApiKey: StateFlow<String> = aiPreferencesRepository.deepseekApiKey
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     
-    val deepseekModel: StateFlow<String> = userPreferencesRepository.deepseekModel
+    val deepseekModel: StateFlow<String> = aiPreferencesRepository.deepseekModel
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     private val fileExplorerStateHolder = FileExplorerStateHolder(userPreferencesRepository, viewModelScope, context)
@@ -240,9 +244,9 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             combine<Any?, SettingsUiUpdate.Group1>(
                 userPreferencesRepository.appRebrandDialogShownFlow,
-                userPreferencesRepository.appThemeModeFlow,
-                userPreferencesRepository.playerThemePreferenceFlow,
-                userPreferencesRepository.albumArtPaletteStyleFlow,
+                themePreferencesRepository.appThemeModeFlow,
+                themePreferencesRepository.playerThemePreferenceFlow,
+                themePreferencesRepository.albumArtPaletteStyleFlow,
                 userPreferencesRepository.mockGenresEnabledFlow,
                 userPreferencesRepository.navBarCornerRadiusFlow,
                 userPreferencesRepository.navBarStyleFlow,
@@ -452,13 +456,13 @@ class SettingsViewModel @Inject constructor(
     // Método para guardar la preferencia de tema del reproductor
     fun setPlayerThemePreference(preference: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setPlayerThemePreference(preference)
+            themePreferencesRepository.setPlayerThemePreference(preference)
         }
     }
 
     fun setAlbumArtPaletteStyle(style: AlbumArtPaletteStyle) {
         viewModelScope.launch {
-            userPreferencesRepository.setAlbumArtPaletteStyle(style)
+            themePreferencesRepository.setAlbumArtPaletteStyle(style)
         }
     }
 
@@ -476,7 +480,7 @@ class SettingsViewModel @Inject constructor(
 
     fun setAppThemeMode(mode: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setAppThemeMode(mode)
+            themePreferencesRepository.setAppThemeMode(mode)
         }
     }
 
@@ -712,7 +716,7 @@ class SettingsViewModel @Inject constructor(
 
     fun onGeminiApiKeyChange(apiKey: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setGeminiApiKey(apiKey)
+            aiPreferencesRepository.setGeminiApiKey(apiKey)
 
             // Fetch models when API key changes and is not empty
             if (apiKey.isNotBlank()) {
@@ -725,14 +729,14 @@ class SettingsViewModel @Inject constructor(
                         modelsFetchError = null
                     )
                 }
-                userPreferencesRepository.setGeminiModel("")
+                aiPreferencesRepository.setGeminiModel("")
             }
         }
     }
     
     fun onAiProviderChange(provider: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setAiProvider(provider)
+            aiPreferencesRepository.setAiProvider(provider)
 
             // Fetch models for the selected provider
             val apiKey = when (provider) {
@@ -756,7 +760,7 @@ class SettingsViewModel @Inject constructor(
     
     fun onDeepseekApiKeyChange(apiKey: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setDeepseekApiKey(apiKey)
+            aiPreferencesRepository.setDeepseekApiKey(apiKey)
             
             // Fetch models when API key changes and is not empty
             if (apiKey.isNotBlank() && aiProvider.value == "DEEPSEEK") {
@@ -769,26 +773,26 @@ class SettingsViewModel @Inject constructor(
                         modelsFetchError = null
                     )
                 }
-                userPreferencesRepository.setDeepseekModel("")
+                aiPreferencesRepository.setDeepseekModel("")
             }
         }
     }
     
     fun onDeepseekModelChange(model: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setDeepseekModel(model)
+            aiPreferencesRepository.setDeepseekModel(model)
         }
     }
 
     fun onDeepseekSystemPromptChange(prompt: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setDeepseekSystemPrompt(prompt)
+            aiPreferencesRepository.setDeepseekSystemPrompt(prompt)
         }
     }
 
     fun resetDeepseekSystemPrompt() {
         viewModelScope.launch {
-            userPreferencesRepository.resetDeepseekSystemPrompt()
+            aiPreferencesRepository.resetDeepseekSystemPrompt()
         }
     }
 
@@ -816,13 +820,13 @@ class SettingsViewModel @Inject constructor(
 
                 // Auto-select first model if none is selected
                 val currentModel = when (providerName) {
-                    "DEEPSEEK" -> userPreferencesRepository.deepseekModel.first()
-                    else -> userPreferencesRepository.geminiModel.first()
+                    "DEEPSEEK" -> aiPreferencesRepository.deepseekModel.first()
+                    else -> aiPreferencesRepository.geminiModel.first()
                 }
                 if (currentModel.isEmpty() && models.isNotEmpty()) {
                     when (providerName) {
-                        "DEEPSEEK" -> userPreferencesRepository.setDeepseekModel(models.first().name)
-                        else -> userPreferencesRepository.setGeminiModel(models.first().name)
+                        "DEEPSEEK" -> aiPreferencesRepository.setDeepseekModel(models.first().name)
+                        else -> aiPreferencesRepository.setGeminiModel(models.first().name)
                     }
                 }
             }.onFailure { error ->
@@ -850,7 +854,7 @@ class SettingsViewModel @Inject constructor(
 
     fun onGeminiModelChange(modelName: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setGeminiModel(modelName)
+            aiPreferencesRepository.setGeminiModel(modelName)
         }
     }
 
@@ -862,13 +866,13 @@ class SettingsViewModel @Inject constructor(
 
     fun onGeminiSystemPromptChange(prompt: String) {
         viewModelScope.launch {
-            userPreferencesRepository.setGeminiSystemPrompt(prompt)
+            aiPreferencesRepository.setGeminiSystemPrompt(prompt)
         }
     }
 
     fun resetGeminiSystemPrompt() {
         viewModelScope.launch {
-            userPreferencesRepository.resetGeminiSystemPrompt()
+            aiPreferencesRepository.resetGeminiSystemPrompt()
         }
     }
 

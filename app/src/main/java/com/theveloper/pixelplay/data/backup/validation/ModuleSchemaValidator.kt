@@ -29,6 +29,17 @@ class ModuleSchemaValidator @Inject constructor(
             return BackupValidationResult.Invalid(errors)
         }
 
+        if (section == BackupSection.PLAYLISTS) {
+            validatePlaylistsModule(jsonElement, errors)
+            return if (errors.any { it.severity == Severity.ERROR }) {
+                BackupValidationResult.Invalid(errors)
+            } else if (errors.isNotEmpty()) {
+                BackupValidationResult.Invalid(errors)
+            } else {
+                BackupValidationResult.Valid
+            }
+        }
+
         // Most modules are JSON arrays
         if (section != BackupSection.QUICK_FILL && section != BackupSection.EQUALIZER) {
             if (!jsonElement.isJsonArray) {
@@ -44,6 +55,9 @@ class ModuleSchemaValidator @Inject constructor(
 
         // Per-module validation
         when (section) {
+            BackupSection.PLAYLISTS -> {
+                // Already handled above for object/legacy compatibility.
+            }
             BackupSection.FAVORITES -> validateFavorites(jsonElement.asJsonArray, errors)
             BackupSection.LYRICS -> validateLyrics(jsonElement.asJsonArray, errors)
             BackupSection.SEARCH_HISTORY -> validateSearchHistory(jsonElement.asJsonArray, errors)
@@ -51,7 +65,6 @@ class ModuleSchemaValidator @Inject constructor(
             BackupSection.PLAYBACK_HISTORY -> validatePlaybackHistory(jsonElement.asJsonArray, errors)
             BackupSection.ARTIST_IMAGES -> validateArtistImages(jsonElement.asJsonArray, errors)
             BackupSection.TRANSITIONS -> validateTransitions(jsonElement.asJsonArray, errors)
-            BackupSection.PLAYLISTS,
             BackupSection.GLOBAL_SETTINGS,
             BackupSection.QUICK_FILL,
             BackupSection.EQUALIZER -> {
@@ -66,6 +79,90 @@ class ModuleSchemaValidator @Inject constructor(
             BackupValidationResult.Invalid(errors)
         } else {
             BackupValidationResult.Valid
+        }
+    }
+
+    private fun validatePlaylistsModule(
+        jsonElement: com.google.gson.JsonElement,
+        errors: MutableList<ValidationError>
+    ) {
+        if (jsonElement.isJsonArray) {
+            // Legacy v1/v2 playlists module: PreferenceBackupEntry array.
+            validatePreferenceEntries(jsonElement, BackupSection.PLAYLISTS.key, errors)
+            return
+        }
+
+        if (!jsonElement.isJsonObject) {
+            errors.add(
+                ValidationError(
+                    "INVALID_PLAYLISTS_PAYLOAD",
+                    "Module '${BackupSection.PLAYLISTS.key}' should be a JSON object or legacy array.",
+                    module = BackupSection.PLAYLISTS.key
+                )
+            )
+            return
+        }
+
+        val obj = jsonElement.asJsonObject
+        val playlistsArray = obj.getAsJsonArray("playlists")
+        if (playlistsArray != null && playlistsArray.size() > MAX_ENTRIES_PER_MODULE) {
+            errors.add(
+                ValidationError(
+                    "TOO_MANY_ENTRIES",
+                    "Module '${BackupSection.PLAYLISTS.key}' has ${playlistsArray.size()} playlists (max $MAX_ENTRIES_PER_MODULE).",
+                    module = BackupSection.PLAYLISTS.key
+                )
+            )
+            return
+        }
+
+        playlistsArray?.forEachIndexed { index, element ->
+            if (!element.isJsonObject) {
+                errors.add(
+                    ValidationError(
+                        "INVALID_PLAYLIST_ENTRY",
+                        "Playlists[$index] is not a JSON object.",
+                        module = BackupSection.PLAYLISTS.key,
+                        severity = Severity.WARNING
+                    )
+                )
+                return@forEachIndexed
+            }
+            val playlistObj = element.asJsonObject
+            val id = playlistObj.get("id")?.asString
+            val name = playlistObj.get("name")?.asString
+            if (id.isNullOrBlank()) {
+                errors.add(
+                    ValidationError(
+                        "MISSING_PLAYLIST_ID",
+                        "Playlists[$index] is missing id.",
+                        module = BackupSection.PLAYLISTS.key,
+                        severity = Severity.WARNING
+                    )
+                )
+            }
+            if (name.isNullOrBlank()) {
+                errors.add(
+                    ValidationError(
+                        "MISSING_PLAYLIST_NAME",
+                        "Playlists[$index] is missing name.",
+                        module = BackupSection.PLAYLISTS.key,
+                        severity = Severity.WARNING
+                    )
+                )
+            }
+        }
+
+        val sortOption = obj.get("playlistsSortOption")?.asString
+        if (sortOption != null && sortOption.length > 200) {
+            errors.add(
+                ValidationError(
+                    "INVALID_SORT_OPTION",
+                    "playlistsSortOption looks invalid (too long).",
+                    module = BackupSection.PLAYLISTS.key,
+                    severity = Severity.WARNING
+                )
+            )
         }
     }
 

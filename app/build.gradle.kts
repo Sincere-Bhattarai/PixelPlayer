@@ -77,11 +77,11 @@ android {
         // Aquí es donde debes agregar freeCompilerArgs para los informes del compilador de Compose.
         freeCompilerArgs += listOf(
             "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=${project.buildDir.absolutePath}/compose_compiler_reports"
+            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=${project.layout.buildDirectory.get().asFile.absolutePath}/compose_compiler_reports"
         )
         freeCompilerArgs += listOf(
             "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=${project.buildDir.absolutePath}/compose_compiler_metrics"
+            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=${project.layout.buildDirectory.get().asFile.absolutePath}/compose_compiler_metrics"
         )
 
         //Stability
@@ -125,6 +125,12 @@ android {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.incremental", "true")
+    arg("room.generateKotlin", "true")
+}
+
 dependencies {
     implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.paging.common)
@@ -134,18 +140,16 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation("androidx.lifecycle:lifecycle-process:2.9.0")
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
+    implementation(libs.androidx.compose.material3)
     // google.genai 1.11.0 — 新版统一 Gemini SDK
     implementation(libs.google.genai)
-    implementation(libs.androidx.mediarouter)
-    implementation(libs.play.services.cast.framework)
     implementation(libs.androidx.navigation.runtime.ktx)
-    implementation(libs.androidx.compose.material3)
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
     testRuntimeOnly(libs.junit.jupiter.engine)
@@ -220,10 +224,6 @@ dependencies {
     //Animations
     implementation(libs.androidx.animation)
 
-    //Material3
-    implementation(libs.material3)
-    implementation("androidx.compose.material3:material3-window-size-class:1.3.1")
-
     //Coil
     implementation(libs.coil.compose)
 
@@ -244,7 +244,7 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.session)
-    implementation(libs.androidx.media.router)
+    implementation(libs.androidx.mediarouter)
     implementation(libs.google.play.services.cast.framework)
     implementation(libs.androidx.media3.exoplayer.ffmpeg)
 

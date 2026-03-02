@@ -9,6 +9,8 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
@@ -19,11 +21,13 @@ import com.theveloper.pixelplay.data.database.EngagementDao
 import com.theveloper.pixelplay.data.database.FavoritesDao
 import com.theveloper.pixelplay.data.database.GDriveDao
 import com.theveloper.pixelplay.data.database.LyricsDao
+import com.theveloper.pixelplay.data.database.LocalPlaylistDao
 import com.theveloper.pixelplay.data.database.MusicDao
 import com.theveloper.pixelplay.data.database.PixelPlayDatabase
 import com.theveloper.pixelplay.data.database.SearchHistoryDao
 import com.theveloper.pixelplay.data.database.TransitionDao
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.dataStore
 import com.theveloper.pixelplay.data.media.SongMetadataEditor
 import com.theveloper.pixelplay.data.network.deezer.DeezerApiService
@@ -125,8 +129,18 @@ object AppModule {
             PixelPlayDatabase.MIGRATION_21_22,
             PixelPlayDatabase.MIGRATION_22_23,
             PixelPlayDatabase.MIGRATION_23_24,
-            PixelPlayDatabase.MIGRATION_24_25
+            PixelPlayDatabase.MIGRATION_24_25,
+            PixelPlayDatabase.MIGRATION_25_26,
+            PixelPlayDatabase.MIGRATION_26_27
         )
+            .addCallback(
+                object : RoomDatabase.Callback() {
+                    override fun onCreate(db: SupportSQLiteDatabase) {
+                        super.onCreate(db)
+                        PixelPlayDatabase.installFavoriteSyncTriggers(db)
+                    }
+                }
+            )
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
@@ -177,6 +191,12 @@ object AppModule {
     @Provides
     fun provideGDriveDao(database: PixelPlayDatabase): GDriveDao {
         return database.gdriveDao()
+    }
+
+    @Singleton
+    @Provides
+    fun provideLocalPlaylistDao(database: PixelPlayDatabase): LocalPlaylistDao {
+        return database.localPlaylistDao()
     }
 
     @Provides
@@ -259,6 +279,7 @@ object AppModule {
     fun provideMusicRepository(
         @ApplicationContext context: Context,
         userPreferencesRepository: UserPreferencesRepository,
+        playlistPreferencesRepository: PlaylistPreferencesRepository,
         searchHistoryDao: SearchHistoryDao,
         musicDao: MusicDao,
         lyricsRepository: LyricsRepository,
@@ -273,6 +294,7 @@ object AppModule {
         return MusicRepositoryImpl(
             context = context,
             userPreferencesRepository = userPreferencesRepository,
+            playlistPreferencesRepository = playlistPreferencesRepository,
             searchHistoryDao = searchHistoryDao,
             musicDao = musicDao,
             lyricsRepository = lyricsRepository,

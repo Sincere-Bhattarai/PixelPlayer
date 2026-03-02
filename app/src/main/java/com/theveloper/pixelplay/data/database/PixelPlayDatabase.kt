@@ -22,11 +22,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NeteaseSongEntity::class,
         NeteasePlaylistEntity::class,
         GDriveSongEntity::class,
-        GDriveFolderEntity::class
+        GDriveFolderEntity::class,
+        PlaylistEntity::class,
+        PlaylistSongEntity::class
     ],
-    version = 25, // Clear duplicated lyrics payloads from songs rows
+    version = 27, // Incremented for playlist schema repair migration
 
-    exportSchema = false
+    exportSchema = true
 )
 abstract class PixelPlayDatabase : RoomDatabase() {
     abstract fun albumArtThemeDao(): AlbumArtThemeDao
@@ -39,6 +41,7 @@ abstract class PixelPlayDatabase : RoomDatabase() {
     abstract fun lyricsDao(): LyricsDao
     abstract fun neteaseDao(): NeteaseDao
     abstract fun gdriveDao(): GDriveDao
+    abstract fun localPlaylistDao(): LocalPlaylistDao
 
     companion object {
         // Gap-bridging no-op migrations for missing version ranges.
@@ -466,6 +469,249 @@ abstract class PixelPlayDatabase : RoomDatabase() {
                 // copy in songs rows makes broad SELECTs vulnerable to CursorWindow overflows.
                 db.execSQL("UPDATE songs SET lyrics = NULL WHERE lyrics IS NOT NULL AND lyrics != ''")
             }
+        }
+
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Cloud/source tables: add query indexes.
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_telegram_songs_chat_id ON telegram_songs(chat_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_telegram_songs_message_id ON telegram_songs(message_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_telegram_songs_file_id ON telegram_songs(file_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_telegram_songs_chat_id_message_id ON telegram_songs(chat_id, message_id)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_netease_songs_netease_id ON netease_songs(netease_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_netease_songs_playlist_id ON netease_songs(playlist_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_netease_songs_playlist_id_date_added ON netease_songs(playlist_id, date_added)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_gdrive_songs_drive_file_id ON gdrive_songs(drive_file_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_gdrive_songs_folder_id ON gdrive_songs(folder_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_gdrive_songs_folder_id_date_added ON gdrive_songs(folder_id, date_added)")
+
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_album_art_themes_albumArtUriString_paletteStyle ON album_art_themes(albumArtUriString, paletteStyle)")
+
+                // favorites table is the source of truth; keep songs.is_favorite mirrored by trigger.
+                db.execSQL(
+                    """
+                        UPDATE songs
+                        SET is_favorite = CASE
+                            WHEN id IN (SELECT songId FROM favorites WHERE isFavorite = 1) THEN 1
+                            ELSE 0
+                        END
+                    """.trimIndent()
+                )
+                installFavoriteSyncTriggers(db)
+
+                recreatePlaylistsTable(db)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlists_last_modified ON playlists(last_modified)")
+
+                recreatePlaylistSongsTable(db)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_songs_playlist_id_sort_order ON playlist_songs(playlist_id, sort_order)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_songs_song_id ON playlist_songs(song_id)")
+            }
+        }
+
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                recreatePlaylistsTable(db)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlists_last_modified ON playlists(last_modified)")
+
+                recreatePlaylistSongsTable(db)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_songs_playlist_id_sort_order ON playlist_songs(playlist_id, sort_order)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_songs_song_id ON playlist_songs(song_id)")
+                installFavoriteSyncTriggers(db)
+            }
+        }
+
+        private fun recreatePlaylistsTable(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS playlists_new")
+            db.execSQL(
+                """
+                    CREATE TABLE playlists_new (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        last_modified INTEGER NOT NULL,
+                        is_ai_generated INTEGER NOT NULL,
+                        is_queue_generated INTEGER NOT NULL,
+                        cover_image_uri TEXT,
+                        cover_color_argb INTEGER,
+                        cover_icon_name TEXT,
+                        cover_shape_type TEXT,
+                        cover_shape_detail_1 REAL,
+                        cover_shape_detail_2 REAL,
+                        cover_shape_detail_3 REAL,
+                        cover_shape_detail_4 REAL,
+                        source TEXT NOT NULL
+                    )
+                """.trimIndent()
+            )
+
+            if (tableExists(db, "playlists")) {
+                val columns = getTableColumns(db, "playlists")
+                if ("id" in columns && "name" in columns) {
+                    val nowMs = "(CAST(strftime('%s','now') AS INTEGER) * 1000)"
+                    val createdAtExpr = columnExpr(columns, "created_at", nowMs)
+                    val lastModifiedExpr = columnExpr(columns, "last_modified", createdAtExpr)
+                    val isAiGeneratedExpr = columnExpr(columns, "is_ai_generated", "0")
+                    val isQueueGeneratedExpr = columnExpr(columns, "is_queue_generated", "0")
+                    val coverImageUriExpr = columnExpr(columns, "cover_image_uri", "NULL")
+                    val coverColorArgbExpr = columnExpr(columns, "cover_color_argb", "NULL")
+                    val coverIconNameExpr = columnExpr(columns, "cover_icon_name", "NULL")
+                    val coverShapeTypeExpr = columnExpr(columns, "cover_shape_type", "NULL")
+                    val coverShapeDetail1Expr = columnExpr(columns, "cover_shape_detail_1", "NULL")
+                    val coverShapeDetail2Expr = columnExpr(columns, "cover_shape_detail_2", "NULL")
+                    val coverShapeDetail3Expr = columnExpr(columns, "cover_shape_detail_3", "NULL")
+                    val coverShapeDetail4Expr = columnExpr(columns, "cover_shape_detail_4", "NULL")
+                    val sourceExpr = columnExpr(columns, "source", "'LOCAL'")
+
+                    db.execSQL(
+                        """
+                            INSERT OR REPLACE INTO playlists_new (
+                                id,
+                                name,
+                                created_at,
+                                last_modified,
+                                is_ai_generated,
+                                is_queue_generated,
+                                cover_image_uri,
+                                cover_color_argb,
+                                cover_icon_name,
+                                cover_shape_type,
+                                cover_shape_detail_1,
+                                cover_shape_detail_2,
+                                cover_shape_detail_3,
+                                cover_shape_detail_4,
+                                source
+                            )
+                            SELECT
+                                id,
+                                name,
+                                $createdAtExpr,
+                                $lastModifiedExpr,
+                                $isAiGeneratedExpr,
+                                $isQueueGeneratedExpr,
+                                $coverImageUriExpr,
+                                $coverColorArgbExpr,
+                                $coverIconNameExpr,
+                                $coverShapeTypeExpr,
+                                $coverShapeDetail1Expr,
+                                $coverShapeDetail2Expr,
+                                $coverShapeDetail3Expr,
+                                $coverShapeDetail4Expr,
+                                $sourceExpr
+                            FROM playlists
+                            WHERE id IS NOT NULL AND name IS NOT NULL
+                        """.trimIndent()
+                    )
+                }
+                db.execSQL("DROP TABLE playlists")
+            }
+
+            db.execSQL("ALTER TABLE playlists_new RENAME TO playlists")
+        }
+
+        private fun recreatePlaylistSongsTable(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS playlist_songs_new")
+            db.execSQL(
+                """
+                    CREATE TABLE playlist_songs_new (
+                        playlist_id TEXT NOT NULL,
+                        song_id TEXT NOT NULL,
+                        sort_order INTEGER NOT NULL,
+                        PRIMARY KEY(playlist_id, song_id)
+                    )
+                """.trimIndent()
+            )
+
+            if (tableExists(db, "playlist_songs")) {
+                val columns = getTableColumns(db, "playlist_songs")
+                if ("playlist_id" in columns && "song_id" in columns) {
+                    val sortOrderExpr = columnExpr(columns, "sort_order", "0")
+                    db.execSQL(
+                        """
+                            INSERT OR REPLACE INTO playlist_songs_new (
+                                playlist_id,
+                                song_id,
+                                sort_order
+                            )
+                            SELECT
+                                playlist_id,
+                                song_id,
+                                $sortOrderExpr
+                            FROM playlist_songs
+                            WHERE playlist_id IS NOT NULL AND song_id IS NOT NULL
+                        """.trimIndent()
+                    )
+                }
+                db.execSQL("DROP TABLE playlist_songs")
+            }
+
+            db.execSQL("ALTER TABLE playlist_songs_new RENAME TO playlist_songs")
+        }
+
+        private fun tableExists(db: SupportSQLiteDatabase, tableName: String): Boolean {
+            db.query(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                arrayOf(tableName)
+            ).use { cursor ->
+                return cursor.moveToFirst()
+            }
+        }
+
+        private fun getTableColumns(db: SupportSQLiteDatabase, tableName: String): Set<String> {
+            val columns = mutableSetOf<String>()
+            db.query("PRAGMA table_info(`$tableName`)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                if (nameIndex == -1) return columns
+                while (cursor.moveToNext()) {
+                    columns += cursor.getString(nameIndex)
+                }
+            }
+            return columns
+        }
+
+        private fun columnExpr(columns: Set<String>, columnName: String, fallbackExpr: String): String {
+            return if (columnName in columns) {
+                "COALESCE($columnName, $fallbackExpr)"
+            } else {
+                fallbackExpr
+            }
+        }
+
+        fun installFavoriteSyncTriggers(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TRIGGER IF EXISTS trg_favorites_insert_sync_song")
+            db.execSQL("DROP TRIGGER IF EXISTS trg_favorites_update_sync_song")
+            db.execSQL("DROP TRIGGER IF EXISTS trg_favorites_delete_sync_song")
+
+            db.execSQL(
+                """
+                    CREATE TRIGGER IF NOT EXISTS trg_favorites_insert_sync_song
+                    AFTER INSERT ON favorites
+                    BEGIN
+                        UPDATE songs SET is_favorite = NEW.isFavorite WHERE id = NEW.songId;
+                    END
+                """.trimIndent()
+            )
+
+            db.execSQL(
+                """
+                    CREATE TRIGGER IF NOT EXISTS trg_favorites_update_sync_song
+                    AFTER UPDATE ON favorites
+                    BEGIN
+                        UPDATE songs SET is_favorite = NEW.isFavorite WHERE id = NEW.songId;
+                    END
+                """.trimIndent()
+            )
+
+            db.execSQL(
+                """
+                    CREATE TRIGGER IF NOT EXISTS trg_favorites_delete_sync_song
+                    AFTER DELETE ON favorites
+                    BEGIN
+                        UPDATE songs SET is_favorite = 0 WHERE id = OLD.songId;
+                    END
+                """.trimIndent()
+            )
         }
     }
 }

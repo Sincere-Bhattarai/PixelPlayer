@@ -41,7 +41,12 @@ object MediaItemBuilder {
     }
 
     fun playbackUri(contentUriString: String): Uri {
-        val uri = contentUriString.toUri()
+        val uri = runCatching { Uri.parse(contentUriString) }.getOrNull()
+            ?: return if (contentUriString.startsWith("/")) {
+                Uri.fromFile(File(contentUriString))
+            } else {
+                Uri.fromFile(File(contentUriString))
+            }
         // Telegram downloaded files can be stored as absolute paths (without file://).
         // Normalize them so ExoPlayer always gets a canonical local-file URI.
         return if (uri.scheme.isNullOrBlank() && contentUriString.startsWith("/")) {

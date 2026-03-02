@@ -66,13 +66,13 @@ data class SongEntity(
     @ColumnInfo(name = "telegram_file_id") val telegramFileId: Int? = null // Added for Telegram integration
 )
 
-fun SongEntity.toSong(): Song {
+private fun SongEntity.toSongInternal(artists: List<ArtistRef>): Song {
     return Song(
         id = this.id.toString(),
         title = this.title.normalizeMetadataTextOrEmpty(),
         artist = this.artistName.normalizeMetadataTextOrEmpty(),
         artistId = this.artistId,
-        artists = emptyList(), // Will be populated from junction table when needed
+        artists = artists,
         album = this.albumName.normalizeMetadataTextOrEmpty(),
         albumId = this.albumId,
         albumArtist = this.albumArtist?.normalizeMetadataText(),
@@ -105,6 +105,10 @@ fun SongEntity.toSong(): Song {
     )
 }
 
+fun SongEntity.toSong(): Song {
+    return toSongInternal(artists = emptyList())
+}
+
 /**
  * Converts a SongEntity to Song with artists from the junction table.
  */
@@ -118,43 +122,8 @@ fun SongEntity.toSongWithArtistRefs(artists: List<ArtistEntity>, crossRefs: List
             isPrimary = crossRef?.isPrimary ?: false
         )
     }.sortedByDescending { it.isPrimary }
-    
-    return Song(
-        id = this.id.toString(),
-        title = this.title.normalizeMetadataTextOrEmpty(),
-        artist = this.artistName.normalizeMetadataTextOrEmpty(),
-        artistId = this.artistId,
-        artists = artistRefs,
-        album = this.albumName.normalizeMetadataTextOrEmpty(),
-        albumId = this.albumId,
-        albumArtist = this.albumArtist?.normalizeMetadataText(),
-        path = this.filePath,
-        contentUriString = this.contentUriString,
-        albumArtUriString = this.albumArtUriString,
-        duration = this.duration,
-        genre = this.genre.normalizeMetadataText(),
-        lyrics = this.lyrics?.normalizeMetadataText(),
-        isFavorite = this.isFavorite,
-        trackNumber = this.trackNumber,
-        dateAdded = this.dateAdded,
-        year = this.year,
-        // Parse Telegram metadata from contentUriString
-        telegramChatId = if (this.contentUriString.startsWith("telegram://")) {
-            this.contentUriString.removePrefix("telegram://").split("/").getOrNull(0)?.toLongOrNull()
-        } else null,
-        telegramFileId = if (this.contentUriString.startsWith("telegram://")) {
-            this.contentUriString.removePrefix("telegram://").split("/").getOrNull(1)?.toIntOrNull()
-        } else null,
-        neteaseId = if (this.contentUriString.startsWith("netease://")) {
-            this.contentUriString.removePrefix("netease://").toLongOrNull()
-        } else null,
-        gdriveFileId = if (this.contentUriString.startsWith("gdrive://")) {
-            this.contentUriString.removePrefix("gdrive://")
-        } else null,
-        mimeType = this.mimeType,
-        bitrate = this.bitrate,
-        sampleRate = this.sampleRate
-    )
+
+    return toSongInternal(artists = artistRefs)
 }
 
 fun List<SongEntity>.toSongs(): List<Song> {

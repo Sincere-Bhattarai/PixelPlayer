@@ -913,7 +913,7 @@ fun SettingsCategoryScreen(
                                     "GEMINI" -> {
                                         GeminiSystemPromptItem(
                                             systemPrompt = geminiSystemPrompt,
-                                            defaultPrompt = com.theveloper.pixelplay.data.preferences.UserPreferencesRepository.DEFAULT_SYSTEM_PROMPT,
+                                            defaultPrompt = com.theveloper.pixelplay.data.preferences.AiPreferencesRepository.DEFAULT_SYSTEM_PROMPT,
                                             onSystemPromptSave = { settingsViewModel.onGeminiSystemPromptChange(it) },
                                             onReset = { settingsViewModel.resetGeminiSystemPrompt() },
                                             title = "System Prompt",
@@ -923,7 +923,7 @@ fun SettingsCategoryScreen(
                                     "DEEPSEEK" -> {
                                         GeminiSystemPromptItem(
                                             systemPrompt = deepseekSystemPrompt,
-                                            defaultPrompt = com.theveloper.pixelplay.data.preferences.UserPreferencesRepository.DEFAULT_DEEPSEEK_SYSTEM_PROMPT,
+                                            defaultPrompt = com.theveloper.pixelplay.data.preferences.AiPreferencesRepository.DEFAULT_DEEPSEEK_SYSTEM_PROMPT,
                                             onSystemPromptSave = { settingsViewModel.onDeepseekSystemPromptChange(it) },
                                             onReset = { settingsViewModel.resetDeepseekSystemPrompt() },
                                             title = "System Prompt",

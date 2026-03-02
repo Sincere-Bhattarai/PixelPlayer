@@ -41,11 +41,11 @@ import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,12 +99,12 @@ fun SongInfoBottomSheet(
 ) {
     val context = LocalContext.current
     var showEditSheet by remember { mutableStateOf(false) }
-    val isPixelPlayWatchAvailable by songInfoViewModel.isPixelPlayWatchAvailable.collectAsState()
-    val isWatchAvailabilityResolved by songInfoViewModel.isWatchAvailabilityResolved.collectAsState()
-    val isSendingToWatch by songInfoViewModel.isSendingToWatch.collectAsState()
-    val watchTransfers by songInfoViewModel.watchTransfers.collectAsState()
-    val watchSongIds by songInfoViewModel.watchSongIds.collectAsState()
-    val reachableWatchNodeIds by songInfoViewModel.reachableWatchNodeIds.collectAsState()
+    val isPixelPlayWatchAvailable by songInfoViewModel.isPixelPlayWatchAvailable.collectAsStateWithLifecycle()
+    val isWatchAvailabilityResolved by songInfoViewModel.isWatchAvailabilityResolved.collectAsStateWithLifecycle()
+    val isSendingToWatch by songInfoViewModel.isSendingToWatch.collectAsStateWithLifecycle()
+    val watchTransfers by songInfoViewModel.watchTransfers.collectAsStateWithLifecycle()
+    val watchSongIds by songInfoViewModel.watchSongIds.collectAsStateWithLifecycle()
+    val reachableWatchNodeIds by songInfoViewModel.reachableWatchNodeIds.collectAsStateWithLifecycle()
     val latestSongWatchTransfer = remember(song.id, watchTransfers) {
         watchTransfers.values
             .asSequence()
@@ -170,21 +170,27 @@ fun SongInfoBottomSheet(
 
     val evenCornerRadiusElems = 26.dp
 
-    val listItemShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTR = 20.dp, smoothnessAsPercentBR = 60, cornerRadiusBR = 20.dp,
-        smoothnessAsPercentTL = 60, cornerRadiusTL = 20.dp, smoothnessAsPercentBL = 60,
-        cornerRadiusBL = 20.dp, smoothnessAsPercentTR = 60
-    )
-    val albumArtShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTR = evenCornerRadiusElems, smoothnessAsPercentBR = 60, cornerRadiusBR = evenCornerRadiusElems,
-        smoothnessAsPercentTL = 60, cornerRadiusTL = evenCornerRadiusElems, smoothnessAsPercentBL = 60,
-        cornerRadiusBL = evenCornerRadiusElems, smoothnessAsPercentTR = 60
-    )
-    val playButtonShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTR = evenCornerRadiusElems, smoothnessAsPercentBR = 60, cornerRadiusBR = evenCornerRadiusElems,
-        smoothnessAsPercentTL = 60, cornerRadiusTL = evenCornerRadiusElems, smoothnessAsPercentBL = 60,
-        cornerRadiusBL = evenCornerRadiusElems, smoothnessAsPercentTR = 60
-    )
+    val listItemShape = remember {
+        AbsoluteSmoothCornerShape(
+            cornerRadiusTR = 20.dp, smoothnessAsPercentBR = 60, cornerRadiusBR = 20.dp,
+            smoothnessAsPercentTL = 60, cornerRadiusTL = 20.dp, smoothnessAsPercentBL = 60,
+            cornerRadiusBL = 20.dp, smoothnessAsPercentTR = 60
+        )
+    }
+    val albumArtShape = remember(evenCornerRadiusElems) {
+        AbsoluteSmoothCornerShape(
+            cornerRadiusTR = evenCornerRadiusElems, smoothnessAsPercentBR = 60, cornerRadiusBR = evenCornerRadiusElems,
+            smoothnessAsPercentTL = 60, cornerRadiusTL = evenCornerRadiusElems, smoothnessAsPercentBL = 60,
+            cornerRadiusBL = evenCornerRadiusElems, smoothnessAsPercentTR = 60
+        )
+    }
+    val playButtonShape = remember(evenCornerRadiusElems) {
+        AbsoluteSmoothCornerShape(
+            cornerRadiusTR = evenCornerRadiusElems, smoothnessAsPercentBR = 60, cornerRadiusBR = evenCornerRadiusElems,
+            smoothnessAsPercentTL = 60, cornerRadiusTL = evenCornerRadiusElems, smoothnessAsPercentBL = 60,
+            cornerRadiusBL = evenCornerRadiusElems, smoothnessAsPercentTR = 60
+        )
+    }
 
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
@@ -222,11 +228,13 @@ fun SongInfoBottomSheet(
         label = "SendToWatchContentColorAnimation"
     )
 
-    val favoriteButtonShape = AbsoluteSmoothCornerShape(
-        cornerRadiusTR = favoriteButtonCornerRadius, smoothnessAsPercentBR = 60, cornerRadiusBR = favoriteButtonCornerRadius,
-        smoothnessAsPercentTL = 60, cornerRadiusTL = favoriteButtonCornerRadius, smoothnessAsPercentBL = 60,
-        cornerRadiusBL = favoriteButtonCornerRadius, smoothnessAsPercentTR = 60
-    )
+    val favoriteButtonShape = remember(favoriteButtonCornerRadius) {
+        AbsoluteSmoothCornerShape(
+            cornerRadiusTR = favoriteButtonCornerRadius, smoothnessAsPercentBR = 60, cornerRadiusBR = favoriteButtonCornerRadius,
+            smoothnessAsPercentTL = 60, cornerRadiusTL = favoriteButtonCornerRadius, smoothnessAsPercentBL = 60,
+            cornerRadiusBL = favoriteButtonCornerRadius, smoothnessAsPercentTR = 60
+        )
+    }
 
     val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 2 })
     val scope = androidx.compose.runtime.rememberCoroutineScope()

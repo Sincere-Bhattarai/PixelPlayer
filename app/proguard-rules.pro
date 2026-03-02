@@ -20,10 +20,6 @@
 # hide the original source file name.
 -renamesourcefileattribute SourceFile
 
-# Disable obfuscation - keep class/method names readable
-# (App is open source, no need to hide code)
--dontobfuscate
-
 # Keep javax.lang.model classes (often needed by annotation processors or code generation libraries)
 -keep class javax.lang.model.** { *; }
 -keep interface javax.lang.model.** { *; }
@@ -83,8 +79,8 @@
 
 # Ktor server engine classes (CIO and internals) — prevent R8 from stripping
 # service-loaded or reflectively-accessed engine wiring.
--keep class io.ktor.** { *; }
--keep class kotlinx.coroutines.** { *; }
+-keep class io.ktor.server.engine.** { *; }
+-keep class io.ktor.server.cio.** { *; }
 
 # Please add these rules to your existing keep rules in order to suppress warnings.
 # This is generated automatically by the Android Gradle plugin.
@@ -152,9 +148,6 @@
 -keep interface org.drinkless.tdlib.** { *; }
 
 # Ktor & Netty Rules (Crucial for StreamProxy)
--keep class io.ktor.** { *; }
--keep class io.netty.** { *; }
--keep class kotlinx.coroutines.** { *; }
 -keep class org.slf4j.** { *; }
 
 # Ktor Specific
@@ -162,15 +155,8 @@
 -dontwarn kotlinx.coroutines.**
 -dontwarn io.netty.**
 
-# Reflection usage in Ktor/Netty
--keepnames class io.ktor.** { *; }
--keepnames class io.netty.** { *; }
-
 # Ensure internal server can start
 -keep class com.theveloper.pixelplay.data.telegram.TelegramStreamProxy { *; }
-
--keep class com.theveloper.pixelplay.data.telegram.** { *; }
--keep interface com.theveloper.pixelplay.data.telegram.** { *; }
 
 # Keep Kotlin reflection if needed by Ktor/Serialization in Release
 -keep class kotlin.reflect.** { *; }
@@ -201,4 +187,3 @@
     public static int d(...);
     public static int i(...);
 }
-
