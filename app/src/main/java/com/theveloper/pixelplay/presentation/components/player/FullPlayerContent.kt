@@ -887,12 +887,14 @@ private fun FullPlayerAlbumCoverSection(
             .fillMaxWidth()
             .padding(vertical = 8.dp)
     ) {
-        val carouselHeight = when (carouselStyle) {
+        val desiredHeight = when (carouselStyle) {
             CarouselStyle.NO_PEEK -> maxWidth
             CarouselStyle.ONE_PEEK -> maxWidth * 0.8f
             CarouselStyle.TWO_PEEK -> maxWidth * 0.6f
             else -> maxWidth * 0.8f
         }
+        // Cap album art height to available space so controls aren't pushed off-screen
+        val carouselHeight = minOf(desiredHeight, maxHeight)
 
         DelayedContent(
             shouldDelay = shouldDelay,
@@ -1000,6 +1002,7 @@ private fun FullPlayerControlsSection(
             }
         }
     ) {
+        val adaptiveSizes = rememberAdaptivePlaybackControlSizes()
         Column(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -1010,7 +1013,9 @@ private fun FullPlayerControlsSection(
                 onPrevious = onPrevious,
                 onPlayPause = onPlayPause,
                 onNext = onNext,
-                height = 80.dp,
+                height = adaptiveSizes.height,
+                playPauseIconSize = adaptiveSizes.playPauseIconSize,
+                iconSize = adaptiveSizes.iconSize,
                 pressAnimationSpec = stableControlAnimationSpec,
                 releaseDelay = 220L,
                 colorOtherButtons = playerSecondaryAccentColor,
@@ -1172,7 +1177,9 @@ private fun FullPlayerPortraitContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceAround
     ) {
-        albumCoverSection(Modifier)
+        // Album art fills remaining space after metadata + controls get their minimum,
+        // preventing controls from being squished on small screens
+        albumCoverSection(Modifier.weight(1f, fill = false))
 
         Column(
             modifier = Modifier.fillMaxWidth(),

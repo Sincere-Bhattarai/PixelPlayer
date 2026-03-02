@@ -50,6 +50,8 @@ class NeteaseRepository @Inject constructor(
         private const val NETEASE_PARENT_DIRECTORY = "/Cloud/Netease"
         private const val NETEASE_GENRE = "Netease Cloud"
         private const val NETEASE_PLAYLIST_PREFIX = "netease_playlist:"
+        /** Max IDs per batch when calling getSongDetails() for tracks beyond the initial ~1000. */
+        private const val SONG_DETAIL_BATCH_SIZE = 800
     }
 
     private val prefs: SharedPreferences =
@@ -193,29 +195,44 @@ class NeteaseRepository @Inject constructor(
             try {
                 val uid = if (userId != -1L) userId else api.getCurrentUserId()
                 Timber.d("syncUserPlaylists: fetching playlists for uid=$uid")
-                val raw = api.getUserPlaylists(uid)
-                Timber.d("syncUserPlaylists: response length=${raw.length}")
-                val root = JSONObject(raw)
 
-                if (root.optInt("code", -1) != 200) {
-                    Timber.e("syncUserPlaylists: API error code=${root.optInt("code")}")
-                    return@withContext Result.failure(Exception("API error: code ${root.optInt("code")}"))
+                val entities = mutableListOf<NeteasePlaylistEntity>()
+                val pageLimit = 50
+                var offset = 0
+                var hasMore = true
+
+                while (hasMore) {
+                    val raw = api.getUserPlaylists(uid, offset = offset, limit = pageLimit)
+                    Timber.d("syncUserPlaylists: page offset=$offset, response length=${raw.length}")
+                    val root = JSONObject(raw)
+
+                    if (root.optInt("code", -1) != 200) {
+                        Timber.e("syncUserPlaylists: API error code=${root.optInt("code")}")
+                        return@withContext Result.failure(Exception("API error: code ${root.optInt("code")}"))
+                    }
+
+                    val playlistArray = root.optJSONArray("playlist")
+                    if (playlistArray == null || playlistArray.length() == 0) break
+
+                    for (i in 0 until playlistArray.length()) {
+                        val pl = playlistArray.optJSONObject(i) ?: continue
+                        entities.add(
+                            NeteasePlaylistEntity(
+                                id = pl.optLong("id"),
+                                name = pl.optString("name", ""),
+                                coverUrl = pl.optString("coverImgUrl", ""),
+                                songCount = pl.optInt("trackCount", 0),
+                                lastSyncTime = System.currentTimeMillis()
+                            )
+                        )
+                    }
+
+                    hasMore = root.optBoolean("more", false)
+                    offset += pageLimit
                 }
 
-                val playlistArray = root.optJSONArray("playlist") ?: return@withContext Result.success(emptyList())
-                val entities = mutableListOf<NeteasePlaylistEntity>()
-
-                for (i in 0 until playlistArray.length()) {
-                    val pl = playlistArray.optJSONObject(i) ?: continue
-                    entities.add(
-                        NeteasePlaylistEntity(
-                            id = pl.optLong("id"),
-                            name = pl.optString("name", ""),
-                            coverUrl = pl.optString("coverImgUrl", ""),
-                            songCount = pl.optInt("trackCount", 0),
-                            lastSyncTime = System.currentTimeMillis()
-                        )
-                    )
+                if (entities.isEmpty()) {
+                    return@withContext Result.success(emptyList())
                 }
 
                 val localPlaylists = dao.getAllPlaylistsList()
@@ -260,13 +277,59 @@ class NeteaseRepository @Inject constructor(
 
                 val playlist = root.optJSONObject("playlist")
                     ?: return@withContext Result.failure(Exception("No playlist data"))
-                val tracks = playlist.optJSONArray("tracks")
-                    ?: return@withContext Result.success(0)
 
+                // ── Collect all track IDs from trackIds (complete, never truncated) ──
+                val trackIdsArray = playlist.optJSONArray("trackIds")
+                val allTrackIds = mutableListOf<Long>()
+                if (trackIdsArray != null) {
+                    for (i in 0 until trackIdsArray.length()) {
+                        val obj = trackIdsArray.optJSONObject(i)
+                        if (obj != null) {
+                            allTrackIds.add(obj.optLong("id"))
+                        }
+                    }
+                }
+
+                // ── Parse the tracks array (may be truncated at ~1000 by the API) ──
+                val tracks = playlist.optJSONArray("tracks")
                 val entities = mutableListOf<NeteaseSongEntity>()
-                for (i in 0 until tracks.length()) {
-                    val track = tracks.optJSONObject(i) ?: continue
-                    entities.add(parseTrackToEntity(track, playlistId))
+                val parsedIds = mutableSetOf<Long>()
+
+                if (tracks != null) {
+                    for (i in 0 until tracks.length()) {
+                        val track = tracks.optJSONObject(i) ?: continue
+                        val entity = parseTrackToEntity(track, playlistId)
+                        entities.add(entity)
+                        parsedIds.add(entity.neteaseId)
+                    }
+                }
+
+                // ── Fetch remaining tracks not included in the truncated response ──
+                val missingIds = allTrackIds.filter { it !in parsedIds }
+                if (missingIds.isNotEmpty()) {
+                    Timber.d("Playlist $playlistId has ${allTrackIds.size} total tracks, " +
+                            "${parsedIds.size} in initial response, " +
+                            "${missingIds.size} need batch fetching")
+
+                    for (batch in missingIds.chunked(SONG_DETAIL_BATCH_SIZE)) {
+                        try {
+                            val detailRaw = api.getSongDetails(batch)
+                            val detailRoot = JSONObject(detailRaw)
+                            val songs = detailRoot.optJSONArray("songs") ?: continue
+                            for (i in 0 until songs.length()) {
+                                val track = songs.optJSONObject(i) ?: continue
+                                entities.add(parseTrackToEntity(track, playlistId))
+                            }
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to fetch batch of ${batch.size} song details for playlist $playlistId")
+                            // Continue with next batch rather than failing entirely
+                        }
+                    }
+                }
+
+                // Fall back: if trackIds was empty/missing, we still have whatever tracks gave us
+                if (allTrackIds.isEmpty() && entities.isEmpty()) {
+                    return@withContext Result.success(0)
                 }
 
                 dao.deleteSongsByPlaylist(playlistId)

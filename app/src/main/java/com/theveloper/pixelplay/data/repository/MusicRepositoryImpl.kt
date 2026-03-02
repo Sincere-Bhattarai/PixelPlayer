@@ -95,6 +95,8 @@ class MusicRepositoryImpl @Inject constructor(
         private const val SEARCH_RESULTS_LIMIT = 100
         private const val UNKNOWN_GENRE_NAME = "Unknown"
         private const val UNKNOWN_GENRE_ID = "unknown"
+        /** Max IDs per query batch for getSongsByIds to stay within SQLite variable limits. */
+        private const val SQLITE_QUERY_BATCH_SIZE = 999
     }
 
     private val directoryScanMutex = Mutex()
@@ -429,8 +431,21 @@ class MusicRepositoryImpl @Inject constructor(
         if (songIds.isEmpty()) return flowOf(emptyList())
         val longIds = songIds.mapNotNull { it.toLongOrNull() }
         if (longIds.isEmpty()) return flowOf(emptyList())
-        return musicDao.getSongsByIds(longIds, emptyList(), false).map { entities ->
-            val songMap = entities.associate { it.id.toString() to it.toSong() }
+
+        // Chunk queries to respect SQLite's SQLITE_MAX_VARIABLE_NUMBER limit (default 999).
+        // Each ID is one variable in the IN (:songIds) clause.
+        val chunks = longIds.chunked(SQLITE_QUERY_BATCH_SIZE)
+        val chunkFlows = chunks.map { chunk ->
+            musicDao.getSongsByIds(chunk, emptyList(), false)
+        }
+
+        return combine(chunkFlows) { arrays ->
+            val songMap = mutableMapOf<String, Song>()
+            for (entityList in arrays) {
+                for (entity in entityList) {
+                    songMap[entity.id.toString()] = entity.toSong()
+                }
+            }
             // Preserve the requested order
             songIds.mapNotNull { songMap[it] }
         }.flowOn(Dispatchers.IO)

@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -243,5 +244,46 @@ private fun MorphingPlayPauseIcon(
             tint = tint,
             modifier = Modifier.size(size)
         )
+    }
+}
+
+/**
+ * Screen-aware default sizes for [AnimatedPlaybackControls].
+ * Adapts height and icon sizes based on the current screen width.
+ */
+data class AdaptivePlaybackControlSizes(
+    val height: Dp,
+    val playPauseIconSize: Dp,
+    val iconSize: Dp
+)
+
+/**
+ * Computes adaptive sizes for playback controls based on [LocalConfiguration] screen width.
+ *
+ * - Compact (< 360 dp): reduced sizes for small phones
+ * - Normal (360-600 dp): standard sizes (matches original defaults)
+ * - Large (> 600 dp): slightly larger for tablets
+ */
+@Composable
+fun rememberAdaptivePlaybackControlSizes(): AdaptivePlaybackControlSizes {
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    return remember(screenWidthDp) {
+        when {
+            screenWidthDp < 360 -> AdaptivePlaybackControlSizes(
+                height = 70.dp,
+                playPauseIconSize = 30.dp,
+                iconSize = 26.dp
+            )
+            screenWidthDp <= 600 -> AdaptivePlaybackControlSizes(
+                height = 80.dp,
+                playPauseIconSize = 36.dp,
+                iconSize = 32.dp
+            )
+            else -> AdaptivePlaybackControlSizes(
+                height = 90.dp,
+                playPauseIconSize = 36.dp,
+                iconSize = 32.dp
+            )
+        }
     }
 }

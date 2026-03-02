@@ -259,6 +259,19 @@ class NeteaseApiService @Inject constructor() {
         return request("https://music.163.com/api/v6/playlist/detail", params, CryptoMode.API, "POST", usePersistedCookies = true)
     }
 
+    /**
+     * Fetch full track details for a batch of song IDs.
+     * Uses the v3/song/detail endpoint which reliably returns full track objects.
+     * Call in batches of up to ~800 IDs to stay within API limits.
+     */
+    fun getSongDetails(songIds: List<Long>): String {
+        val cArray = songIds.joinToString(",") { """{"id":$it}""" }
+        val params = mutableMapOf<String, Any>(
+            "c" to "[$cArray]"
+        )
+        return request("https://music.163.com/api/v3/song/detail", params, CryptoMode.API, "POST", usePersistedCookies = true)
+    }
+
     // ─── Song Data ─────────────────────────────────────────────────────
 
     /**
