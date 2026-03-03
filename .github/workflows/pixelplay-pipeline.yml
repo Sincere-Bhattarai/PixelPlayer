@@ -125,6 +125,8 @@ jobs:
     needs: lint-and-test
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - name: Download Lint Reports
         uses: actions/download-artifact@v4
@@ -132,9 +134,9 @@ jobs:
           name: lint-reports
 
       - name: Gemini AI Lint Review
-        if: secrets.GEMINI_API_KEY != ''
+        if: env.GEMINI_API_KEY != ''
         uses: google-gemini/gemini-github-action@v1.1.0
         with:
-          api-key: ${{ secrets.GEMINI_API_KEY }}
+          api-key: ${{ env.GEMINI_API_KEY }}
           file-path: "app/build/reports/lint-results-debug.xml"
           prompt: "Please review this Android Lint report for the PixelPlay music player. Summarize the most critical issues, security vulnerabilities, and performance suggestions. Provide the output in a concise markdown format suitable for a GitHub comment."
