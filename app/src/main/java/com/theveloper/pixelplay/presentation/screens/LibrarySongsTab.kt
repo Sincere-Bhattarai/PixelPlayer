@@ -71,7 +71,6 @@ fun LibrarySongsTab(
     selectedSongIds: Set<String> = emptySet(),
     onSongLongPress: (Song) -> Unit = {},
     onSongSelectionToggle: (Song) -> Unit = {},
-    getSelectionIndex: (String) -> Int? = { null },
     onLocateCurrentSongVisibilityChanged: (Boolean) -> Unit = {},
     onRegisterLocateCurrentSongAction: ((() -> Unit)?) -> Unit = {},
     storageFilter: StorageFilter = StorageFilter.ALL
@@ -314,7 +313,6 @@ fun LibrarySongsTab(
                                         isLoading = false,
                                         isSelected = isSelected,
                                         isSelectionMode = isSelectionMode,
-                                        selectionIndex = if (isSelectionMode) getSelectionIndex(song.id) else null,
                                         onLongPress = rememberedOnLongPress,
                                         onMoreOptionsClick = rememberedOnMoreOptionsClick,
                                         onClick = rememberedOnClick

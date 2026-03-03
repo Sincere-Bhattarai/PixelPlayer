@@ -123,7 +123,7 @@ jobs:
   ai-analysis:
     name: AI Lint Analysis
     needs: lint-and-test
-    if: always() && github.event_name == 'pull_request' && secrets.GEMINI_API_KEY != ''
+    if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Download Lint Reports
@@ -132,6 +132,7 @@ jobs:
           name: lint-reports
 
       - name: Gemini AI Lint Review
+        if: secrets.GEMINI_API_KEY != ''
         uses: google-gemini/gemini-github-action@v1.1.0
         with:
           api-key: ${{ secrets.GEMINI_API_KEY }}
