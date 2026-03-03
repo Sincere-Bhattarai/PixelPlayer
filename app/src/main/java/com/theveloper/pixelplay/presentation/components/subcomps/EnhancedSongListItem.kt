@@ -318,7 +318,7 @@ fun EnhancedSongListItem(
                             ) {
                                 if (selectionIndex != null && selectionIndex >= 0) {
                                     Text(
-                                        text = "${selectionIndex + 1}",
+                                        text = "$selectionIndex",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = colors.onPrimary
