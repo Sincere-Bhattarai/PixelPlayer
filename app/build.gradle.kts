@@ -36,6 +36,15 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("voidplay.jks")
+            storePassword = System.getenv("VOID_STORE_PASS")
+            keyAlias = System.getenv("VOID_ALIAS")
+            keyPassword = System.getenv("VOID_KEY_PASS")
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -48,7 +57,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
 
         // AGREGA ESTE BLOQUE:

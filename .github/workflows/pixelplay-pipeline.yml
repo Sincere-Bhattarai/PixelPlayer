@@ -1,0 +1,139 @@
+name: PixelPlay CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Execute Permission
+        run: chmod +x gradlew
+
+      - name: Run Lint
+        run: ./gradlew lintDebug
+        continue-on-error: true
+
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest
+
+      - name: Upload Lint Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-reports
+          path: '**/build/reports/lint-results-debug.xml'
+
+  build-debug:
+    name: Build Debug APKs
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Execute Permission
+        run: chmod +x gradlew
+
+      - name: Build Debug APKs
+        run: ./gradlew :app:assembleDebug :wear:assembleDebug
+
+      - name: Upload Phone Debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixelPlay-Phone-Debug
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload Wear OS Debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixelPlay-Wear-Debug
+          path: wear/build/outputs/apk/debug/*.apk
+
+  build-release:
+    name: Build Signed Release APKs
+    needs: lint-and-test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Execute Permission
+        run: chmod +x gradlew
+
+      - name: Decode Keystore
+        run: |
+          if [ -n "${{ secrets.SIGNING_KEY }}" ]; then
+            echo "${{ secrets.SIGNING_KEY }}" | base64 -d > app/voidplay.jks
+            cp app/voidplay.jks wear/voidplay.jks
+          else
+            echo "SIGNING_KEY secret is missing. Skipping signing."
+            exit 1
+          fi
+
+      - name: Build Release APKs
+        run: ./gradlew :app:assembleRelease :wear:assembleRelease
+        env:
+          VOID_STORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
+          VOID_ALIAS: ${{ secrets.ALIAS }}
+          VOID_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload Phone Release APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixelPlay-Phone-Release
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload Wear OS Release APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixelPlay-Wear-Release
+          path: wear/build/outputs/apk/release/*.apk
+
+  ai-analysis:
+    name: AI Lint Analysis
+    needs: lint-and-test
+    if: always() && github.event_name == 'pull_request' && secrets.GEMINI_API_KEY != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Lint Reports
+        uses: actions/download-artifact@v4
+        with:
+          name: lint-reports
+
+      - name: Gemini AI Lint Review
+        uses: google-gemini/gemini-github-action@v1.1.0
+        with:
+          api-key: ${{ secrets.GEMINI_API_KEY }}
+          file-path: "app/build/reports/lint-results-debug.xml"
+          prompt: "Please review this Android Lint report for the PixelPlay music player. Summarize the most critical issues, security vulnerabilities, and performance suggestions. Provide the output in a concise markdown format suitable for a GitHub comment."
