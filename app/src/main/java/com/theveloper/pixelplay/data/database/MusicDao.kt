@@ -1046,6 +1046,30 @@ interface MusicDao {
         }
     }
 
+    /**
+     * Atomically rebuild local music data. This prevents ending up with an empty library if
+     * the worker is cancelled between clear and insert steps.
+     */
+    @Transaction
+    suspend fun rebuildMusicDataWithCrossRefs(
+        songs: List<SongEntity>,
+        albums: List<AlbumEntity>,
+        artists: List<ArtistEntity>,
+        crossRefs: List<SongArtistCrossRef>
+    ) {
+        clearAllSongArtistCrossRefs()
+        clearAllSongs()
+        clearAllAlbums()
+        clearAllArtists()
+
+        insertArtists(artists)
+        insertAlbums(albums)
+        insertSongs(songs)
+        crossRefs.chunked(CROSS_REF_BATCH_SIZE).forEach { chunk ->
+            insertSongArtistCrossRefs(chunk)
+        }
+    }
+
     companion object {
         /**
          * SQLite has a limit on the number of variables per statement (default 999, higher in newer versions).
