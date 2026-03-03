@@ -3,6 +3,7 @@ package com.theveloper.pixelplay.data
 import android.app.Application
 import android.os.SystemClock
 import android.webkit.MimeTypeMap
+import com.google.android.gms.wearable.ChannelClient
 import com.google.android.gms.wearable.MessageClient
 import com.google.android.gms.wearable.NodeClient
 import com.theveloper.pixelplay.data.local.LocalSongDao
@@ -69,6 +70,7 @@ data class TransferState(
 class WearTransferRepository @Inject constructor(
     private val application: Application,
     private val localSongDao: LocalSongDao,
+    private val channelClient: ChannelClient,
     private val messageClient: MessageClient,
     private val nodeClient: NodeClient,
 ) {
@@ -155,6 +157,17 @@ class WearTransferRepository @Inject constructor(
         }
 
         scope.launch {
+            val existingSong = localSongDao.getSongById(songId)
+            if (existingSong?.hasPlayableLocalFile() == true) {
+                notifyPhoneTransferFailure(
+                    targetNodeId = targetNodeId,
+                    requestId = requestId,
+                    songId = songId,
+                    message = WearTransferProgress.ERROR_ALREADY_ON_WATCH,
+                )
+                return@launch
+            }
+
             clearStaleTransfersForSong(songId)
             songToRequestId[songId] = requestId
 
@@ -202,10 +215,46 @@ class WearTransferRepository @Inject constructor(
         }
     }
 
+    private suspend fun notifyPhoneTransferFailure(
+        targetNodeId: String?,
+        requestId: String,
+        songId: String,
+        message: String,
+    ) {
+        Timber.tag(TAG).d(
+            "Rejecting transfer requestId=%s songId=%s: %s",
+            requestId,
+            songId,
+            message,
+        )
+        if (targetNodeId == null) return
+
+        runCatching {
+            val progress = WearTransferProgress(
+                requestId = requestId,
+                songId = songId,
+                bytesTransferred = 0L,
+                totalBytes = 0L,
+                status = WearTransferProgress.STATUS_FAILED,
+                error = message,
+            )
+            messageClient.sendMessage(
+                targetNodeId,
+                WearDataPaths.TRANSFER_PROGRESS,
+                json.encodeToString(progress).toByteArray(Charsets.UTF_8),
+            ).await()
+        }.onFailure { error ->
+            Timber.tag(TAG).w(error, "Failed to report transfer failure to phone")
+        }
+    }
+
     /**
      * Called when metadata arrives from the phone (before the audio channel opens).
      */
-    fun onMetadataReceived(metadata: WearTransferMetadata) {
+    suspend fun onMetadataReceived(
+        metadata: WearTransferMetadata,
+        sourceNodeId: String? = null,
+    ) {
         if (isTransferCancelled(metadata.requestId)) {
             cleanupCancelledTransfer(metadata.requestId, metadata.songId)
             return
@@ -214,6 +263,21 @@ class WearTransferRepository @Inject constructor(
         if (errorMsg != null) {
             Timber.tag(TAG).w("Transfer rejected by phone: $errorMsg")
             handleTransferError(metadata.requestId, metadata.songId, errorMsg)
+            return
+        }
+        val existingSong = localSongDao.getSongById(metadata.songId)
+        if (existingSong?.hasPlayableLocalFile() == true) {
+            notifyPhoneTransferFailure(
+                targetNodeId = sourceNodeId,
+                requestId = metadata.requestId,
+                songId = metadata.songId,
+                message = WearTransferProgress.ERROR_ALREADY_ON_WATCH,
+            )
+            handleTransferError(
+                requestId = metadata.requestId,
+                songId = metadata.songId,
+                message = WearTransferProgress.ERROR_ALREADY_ON_WATCH,
+            )
             return
         }
 
@@ -289,11 +353,57 @@ class WearTransferRepository @Inject constructor(
         }
     }
 
+    fun receiveAudioChannel(channel: ChannelClient.Channel) {
+        scope.launch {
+            runCatching {
+                channelClient.getInputStream(channel).await().use { inputStream ->
+                    val requestId = readLengthPrefixedString(inputStream, "requestId")
+                    Timber.tag(TAG).d("Audio transfer channel: requestId=%s", requestId)
+                    onAudioChannelOpened(requestId, inputStream)
+                }
+            }.onFailure { error ->
+                Timber.tag(TAG).e(error, "Failed to receive audio transfer channel")
+            }
+            runCatching { channelClient.close(channel).await() }
+                .onFailure { error -> Timber.tag(TAG).w(error, "Failed to close audio transfer channel") }
+        }
+    }
+
+    fun receiveArtworkChannel(channel: ChannelClient.Channel) {
+        scope.launch {
+            runCatching {
+                channelClient.getInputStream(channel).await().use { stream ->
+                    val requestId = readLengthPrefixedString(stream, "requestId")
+                    val songId = readLengthPrefixedString(stream, "songId")
+                    val artworkBytes = stream.readBytesSafely()
+                    if (artworkBytes.isNotEmpty()) {
+                        onArtworkReceived(
+                            requestId = requestId,
+                            songId = songId,
+                            artworkBytes = artworkBytes,
+                        )
+                        Timber.tag(TAG).d(
+                            "Artwork received for requestId=%s, bytes=%d",
+                            requestId,
+                            artworkBytes.size,
+                        )
+                    } else {
+                        Timber.tag(TAG).d("Artwork stream empty for requestId=%s", requestId)
+                    }
+                }
+            }.onFailure { error ->
+                Timber.tag(TAG).e(error, "Failed to receive artwork transfer channel")
+            }
+            runCatching { channelClient.close(channel).await() }
+                .onFailure { error -> Timber.tag(TAG).w(error, "Failed to close artwork transfer channel") }
+        }
+    }
+
     /**
      * Called when a ChannelClient channel is opened by the phone.
      * Reads the audio stream, writes it to local storage, and inserts into Room.
      */
-    suspend fun onChannelOpened(requestId: String, inputStream: InputStream) {
+    private suspend fun onAudioChannelOpened(requestId: String, inputStream: InputStream) {
         activeChannelRequestIds.add(requestId)
         if (isTransferCancelled(requestId)) {
             inputStream.close()
@@ -696,5 +806,40 @@ class WearTransferRepository @Inject constructor(
 
     private fun clearTransferWatchdog(requestId: String) {
         transferWatchdogs.remove(requestId)?.cancel()
+    }
+
+    private fun readLengthPrefixedString(inputStream: InputStream, label: String): String {
+        val lengthBytes = ByteArray(4)
+        var totalRead = 0
+        while (totalRead < 4) {
+            val read = inputStream.read(lengthBytes, totalRead, 4 - totalRead)
+            if (read == -1) throw Exception("Stream ended before $label length")
+            totalRead += read
+        }
+
+        val length = java.nio.ByteBuffer.wrap(lengthBytes).int
+        if (length < 0 || length > 1024 * 1024) {
+            throw Exception("Invalid $label length: $length")
+        }
+
+        val data = ByteArray(length)
+        totalRead = 0
+        while (totalRead < length) {
+            val read = inputStream.read(data, totalRead, length - totalRead)
+            if (read == -1) throw Exception("Stream ended before $label data")
+            totalRead += read
+        }
+        return String(data, Charsets.UTF_8)
+    }
+
+    private fun InputStream.readBytesSafely(): ByteArray {
+        val buffer = ByteArray(8192)
+        val output = java.io.ByteArrayOutputStream()
+        while (true) {
+            val read = read(buffer)
+            if (read <= 0) break
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
     }
 }

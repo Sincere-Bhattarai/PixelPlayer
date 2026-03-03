@@ -194,7 +194,7 @@
         </provider>
 
         <receiver android:name=".ui.glancewidget.WidgetUpdateReceiver" android:exported="true"> <intent-filter>
-            <action android:name="com.example.pixelplay.ACTION_WIDGET_UPDATE_PLAYBACK_STATE" />
+            <action android:name="com.theveloper.pixelplay.ACTION_WIDGET_UPDATE_PLAYBACK_STATE" />
         </intent-filter>
         </receiver>
 
@@ -245,6 +245,14 @@
                     android:scheme="wear"
                     android:host="*"
                     android:pathPrefix="/transfer_cancel" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/transfer_progress" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/watch_library_state" />
             </intent-filter>
         </service>
 

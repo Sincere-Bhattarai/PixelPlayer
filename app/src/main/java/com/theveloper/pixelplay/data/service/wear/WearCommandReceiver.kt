@@ -23,6 +23,7 @@ import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import com.google.common.util.concurrent.ListenableFuture
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -30,8 +31,9 @@ import androidx.media3.session.SessionCommand
 import androidx.core.content.ContextCompat
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
+import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import com.theveloper.pixelplay.data.preferences.ThemePreference
-import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.ThemePreferencesRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.data.service.MusicService
 import com.theveloper.pixelplay.data.service.MusicNotificationProvider
@@ -87,7 +89,8 @@ import kotlin.coroutines.resume
 class WearCommandReceiver : WearableListenerService() {
 
     @Inject lateinit var musicRepository: MusicRepository
-    @Inject lateinit var userPreferencesRepository: UserPreferencesRepository
+    @Inject lateinit var themePreferencesRepository: ThemePreferencesRepository
+    @Inject lateinit var playlistPreferencesRepository: PlaylistPreferencesRepository
     @Inject lateinit var dualPlayerEngine: DualPlayerEngine
     @Inject lateinit var colorSchemeProcessor: ColorSchemeProcessor
     @Inject lateinit var transferStateStore: PhoneWatchTransferStateStore
@@ -105,7 +108,7 @@ class WearCommandReceiver : WearableListenerService() {
 
     companion object {
         private const val TAG = "WearCommandReceiver"
-        private const val MAX_SONGS = 500
+        private const val MAX_BROWSE_SONGS = 500
         private const val MAX_ALBUMS = 200
         private const val MAX_ARTISTS = 200
         private val EXPLICIT_PLAY_RETRY_DELAYS_MS = longArrayOf(180L, 700L)
@@ -131,6 +134,7 @@ class WearCommandReceiver : WearableListenerService() {
             WearDataPaths.TRANSFER_REQUEST -> runBlocking(Dispatchers.IO) {
                 handleTransferRequest(messageEvent)
             }
+            WearDataPaths.TRANSFER_PROGRESS -> handleWatchTransferProgress(messageEvent)
             WearDataPaths.TRANSFER_CANCEL -> handleTransferCancel(messageEvent)
             WearDataPaths.WATCH_LIBRARY_STATE -> handleWatchLibraryState(messageEvent)
             else -> Timber.tag(TAG).w("Unknown message path: ${messageEvent.path}")
@@ -148,6 +152,33 @@ class WearCommandReceiver : WearableListenerService() {
             )
         }.onFailure { error ->
             Timber.tag(TAG).e(error, "Failed to parse watch library state")
+        }
+    }
+
+    private fun handleWatchTransferProgress(messageEvent: MessageEvent) {
+        val progressJson = String(messageEvent.data, Charsets.UTF_8)
+        runCatching {
+            json.decodeFromString<WearTransferProgress>(progressJson)
+        }.onSuccess { progress ->
+            transferStateStore.markProgress(
+                requestId = progress.requestId,
+                songId = progress.songId,
+                bytesTransferred = progress.bytesTransferred,
+                totalBytes = progress.totalBytes,
+                status = progress.status,
+                error = progress.error,
+            )
+            if (
+                progress.status == WearTransferProgress.STATUS_FAILED &&
+                progress.error == WearTransferProgress.ERROR_ALREADY_ON_WATCH
+            ) {
+                transferStateStore.markSongPresentOnWatch(
+                    nodeId = messageEvent.sourceNodeId,
+                    songId = progress.songId,
+                )
+            }
+        }.onFailure { error ->
+            Timber.tag(TAG).e(error, "Failed to parse watch transfer progress")
         }
     }
 
@@ -264,7 +295,7 @@ class WearCommandReceiver : WearableListenerService() {
 
         scope.launch {
             try {
-                val song = resolveSongForCommand(command)
+                val song = resolveSongById(songId)
                 if (song == null) {
                     sendPlaybackResult(
                         nodeId = targetNodeId,
@@ -506,7 +537,7 @@ class WearCommandReceiver : WearableListenerService() {
 
         scope.launch {
             try {
-                val song = resolveSongForCommand(command)
+                val song = resolveSongById(songId)
                 if (song == null) {
                     Timber.tag(TAG).w("Cannot resolve song for queue insert: songId=$songId")
                     return@launch
@@ -554,8 +585,16 @@ class WearCommandReceiver : WearableListenerService() {
                     return@launch
                 }
 
-                val mediaItems = songs.map { MediaItemBuilder.build(it) }
-                val startIndex = songs.indexOfFirst { it.id == songId }.coerceAtLeast(0)
+                val startIndex = songs.indexOfFirst { it.id == songId }
+                if (startIndex < 0) {
+                    Timber.tag(TAG).w(
+                        "PLAY_FROM_CONTEXT song not found inside context: type=%s contextId=%s songId=%s",
+                        contextType,
+                        command.contextId,
+                        songId,
+                    )
+                    return@launch
+                }
                 val startSong = songs[startIndex]
                 val cloudReady = ensureStartSongCloudUriResolved(startSong)
                 if (!cloudReady) {
@@ -565,11 +604,15 @@ class WearCommandReceiver : WearableListenerService() {
                     )
                     return@launch
                 }
+                val mediaItems = buildPlaybackQueueMediaItems(songs)
 
                 getOrBuildMediaController { controller ->
+                    // Large watch-initiated queues can exceed Binder limits if we send the
+                    // whole timeline through MediaController, so write directly to the player.
+                    val enginePlayer = dualPlayerEngine.masterPlayer
                     startExplicitPlayback(controller, startSong.id) {
-                        controller.setMediaItems(mediaItems, startIndex, 0L)
-                        controller.prepare()
+                        enginePlayer.setMediaItems(mediaItems, startIndex, 0L)
+                        enginePlayer.prepare()
                     }
                     Timber.tag(TAG).d(
                         "Playing from context: $contextType, song=${songs[startIndex].title}, " +
@@ -667,7 +710,7 @@ class WearCommandReceiver : WearableListenerService() {
             }
             "playlist" -> {
                 val playlistId = contextId ?: return emptyList()
-                val playlist = userPreferencesRepository.userPlaylistsFlow.first()
+                val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                     .find { it.id == playlistId } ?: return emptyList()
                 val songs = musicRepository.getSongsByIds(playlist.songIds).first()
                 // Maintain playlist order
@@ -678,7 +721,8 @@ class WearCommandReceiver : WearableListenerService() {
                 musicRepository.getFavoriteSongsOnce()
             }
             "all_songs" -> {
-                musicRepository.getAllSongsOnce().take(MAX_SONGS)
+                // Playback queues must include the full phone library, even if watch browsing is capped.
+                musicRepository.getAllSongsOnce()
             }
             else -> {
                 Timber.tag(TAG).w("Unknown context type: $contextType")
@@ -687,18 +731,14 @@ class WearCommandReceiver : WearableListenerService() {
         }
     }
 
-    private suspend fun resolveSongForCommand(command: WearPlaybackCommand): Song? {
-        val songId = command.songId ?: return null
-        val contextType = command.contextType
-        val contextId = command.contextId
-
-        if (!contextType.isNullOrBlank()) {
-            val contextSongs = getSongsForContext(contextType, contextId)
-            val inContext = contextSongs.firstOrNull { it.id == songId }
-            if (inContext != null) return inContext
-        }
-
+    private suspend fun resolveSongById(songId: String): Song? {
         return musicRepository.getSongsByIds(listOf(songId)).first().firstOrNull()
+    }
+
+    private suspend fun buildPlaybackQueueMediaItems(songs: List<Song>): List<MediaItem> {
+        return withContext(Dispatchers.Default) {
+            songs.map { MediaItemBuilder.build(it) }
+        }
     }
 
     private suspend fun sendPlaybackResult(
@@ -814,7 +854,7 @@ class WearCommandReceiver : WearableListenerService() {
             }
 
             WearBrowseRequest.PLAYLISTS -> {
-                userPreferencesRepository.userPlaylistsFlow.first()
+                playlistPreferencesRepository.userPlaylistsFlow.first()
                     .map { playlist ->
                         WearLibraryItem(
                             id = playlist.id,
@@ -827,13 +867,13 @@ class WearCommandReceiver : WearableListenerService() {
 
             WearBrowseRequest.FAVORITES -> {
                 musicRepository.getFavoriteSongsOnce()
-                    .take(MAX_SONGS)
+                    .take(MAX_BROWSE_SONGS)
                     .map { song -> song.toWearLibraryItem() }
             }
 
             WearBrowseRequest.ALL_SONGS -> {
                 musicRepository.getAllSongsOnce()
-                    .take(MAX_SONGS)
+                    .take(MAX_BROWSE_SONGS)
                     .map { song -> song.toWearLibraryItem() }
             }
 
@@ -858,7 +898,7 @@ class WearCommandReceiver : WearableListenerService() {
             WearBrowseRequest.PLAYLIST_SONGS -> {
                 val playlistId = contextId
                     ?: throw IllegalArgumentException("Missing playlistId for PLAYLIST_SONGS")
-                val playlist = userPreferencesRepository.userPlaylistsFlow.first()
+                val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                     .find { it.id == playlistId }
                     ?: throw IllegalArgumentException("Playlist not found: $playlistId")
                 val songs = musicRepository.getSongsByIds(playlist.songIds).first()
@@ -1411,14 +1451,14 @@ class WearCommandReceiver : WearableListenerService() {
     }
 
     private suspend fun resolveTransferThemePalette(song: Song): WearThemePalette? {
-        val playerTheme = userPreferencesRepository.playerThemePreferenceFlow.first()
+        val playerTheme = themePreferencesRepository.playerThemePreferenceFlow.first()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && playerTheme == ThemePreference.DYNAMIC) {
             return buildWearThemePalette(dynamicDarkColorScheme(this))
         }
 
         val artUriString = song.albumArtUriString?.takeIf { it.isNotBlank() } ?: return null
         val paletteStyle = AlbumArtPaletteStyle.fromStorageKey(
-            userPreferencesRepository.albumArtPaletteStyleFlow.first().storageKey
+            themePreferencesRepository.albumArtPaletteStyleFlow.first().storageKey
         )
         val schemePair = colorSchemeProcessor.getOrGenerateColorScheme(artUriString, paletteStyle)
             ?: return null
@@ -1775,6 +1815,12 @@ class WearCommandReceiver : WearableListenerService() {
             status = status,
             error = error,
         )
+        if (status == WearTransferProgress.STATUS_COMPLETED) {
+            transferStateStore.markSongPresentOnWatch(
+                nodeId = nodeId,
+                songId = songId,
+            )
+        }
         val progress = WearTransferProgress(
             requestId = requestId,
             songId = songId,

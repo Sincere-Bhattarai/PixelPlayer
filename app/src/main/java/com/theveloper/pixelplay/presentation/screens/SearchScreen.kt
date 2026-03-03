@@ -139,8 +139,8 @@ fun SearchScreen(
     val genres by playerViewModel.genres.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
+    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
-    var selectedSongForInfo by remember { mutableStateOf<Song?>(null) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val searchInputFocusRequester = remember { FocusRequester() }
 
@@ -162,7 +162,6 @@ fun SearchScreen(
     }
     val searchResults = uiState.searchResults
     val handleSongMoreOptionsClick: (Song) -> Unit = { song ->
-        selectedSongForInfo = song
         playerViewModel.selectSongForInfo(song)
         showSongInfoBottomSheet = true
     }

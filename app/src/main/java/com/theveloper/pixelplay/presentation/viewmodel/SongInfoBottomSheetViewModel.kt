@@ -35,6 +35,8 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     private val _isRequestingToWatch = MutableStateFlow(false)
     val watchTransfers: StateFlow<Map<String, PhoneWatchTransferState>> = transferStateStore.transfers
     val watchSongIds: StateFlow<Set<String>> = transferStateStore.watchSongIds
+    val reachableWatchNodeIds: StateFlow<Set<String>> = transferStateStore.reachableWatchNodeIds
+    val isWatchLibraryResolved: StateFlow<Boolean> = transferStateStore.isWatchLibraryResolved
     val activeWatchTransfer: StateFlow<PhoneWatchTransferState?> = watchTransfers
         .map { transfers ->
             transfers.values
@@ -68,7 +70,9 @@ class SongInfoBottomSheetViewModel @Inject constructor(
             _isWatchAvailabilityResolved.value = true
             _isRefreshingWatchAvailability.value = false
             if (available) {
-                wearPhoneTransferSender.refreshWatchLibraryState()
+                viewModelScope.launch {
+                    wearPhoneTransferSender.refreshWatchLibraryState()
+                }
             }
         }
     }
@@ -93,6 +97,15 @@ class SongInfoBottomSheetViewModel @Inject constructor(
         viewModelScope.launch {
             if (!isLocalSongForWatchTransfer(song)) {
                 onComplete("Only local songs can be sent to watch")
+                return@launch
+            }
+            if (!_isPixelPlayWatchAvailable.value) {
+                onComplete("No reachable watch with PixelPlay")
+                refreshWatchAvailability()
+                return@launch
+            }
+            if (transferStateStore.isSongSavedOnAllReachableWatches(song.id)) {
+                onComplete(WearTransferProgress.ERROR_ALREADY_ON_WATCH)
                 return@launch
             }
 
@@ -121,5 +134,9 @@ class SongInfoBottomSheetViewModel @Inject constructor(
         viewModelScope.launch {
             wearPhoneTransferSender.cancelTransfer(requestId)
         }
+    }
+
+    fun isSongSavedOnAllReachableWatches(songId: String): Boolean {
+        return transferStateStore.isSongSavedOnAllReachableWatches(songId)
     }
 }

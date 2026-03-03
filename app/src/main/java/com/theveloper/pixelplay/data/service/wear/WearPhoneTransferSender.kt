@@ -21,6 +21,7 @@ class WearPhoneTransferSender @Inject constructor(
     private val application: Application,
     private val transferStateStore: PhoneWatchTransferStateStore,
     private val transferCancellationStore: PhoneWatchTransferCancellationStore,
+    private val directTransferCoordinator: PhoneDirectWatchTransferCoordinator,
 ) {
     private val capabilityClient by lazy { Wearable.getCapabilityClient(application) }
     private val messageClient: MessageClient by lazy { Wearable.getMessageClient(application) }
@@ -48,7 +49,9 @@ class WearPhoneTransferSender @Inject constructor(
                 CapabilityClient.FILTER_REACHABLE,
             ).await()
             val nodes = capability.nodes
-            transferStateStore.retainReachableWatchNodes(nodes.map { it.id }.toSet())
+            val nodeIds = nodes.map { it.id }.toSet()
+            transferStateStore.retainReachableWatchNodes(nodeIds)
+            transferStateStore.beginWatchLibraryRefresh(nodeIds)
             if (nodes.isEmpty()) return@runCatching
 
             nodes.forEach { node ->
@@ -88,11 +91,11 @@ class WearPhoneTransferSender @Inject constructor(
             )
 
             nodes.forEach { node ->
-                messageClient.sendMessage(
-                    node.id,
-                    WearDataPaths.TRANSFER_REQUEST,
-                    payload,
-                ).await()
+                directTransferCoordinator.startTransferToWatch(
+                    nodeId = node.id,
+                    requestId = request.requestId,
+                    songId = songId,
+                )
             }
             nodes.size
         }.onFailure { error ->

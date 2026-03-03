@@ -38,6 +38,12 @@ class PhoneWatchTransferStateStore @Inject constructor() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _transfers = MutableStateFlow<Map<String, PhoneWatchTransferState>>(emptyMap())
     val transfers: StateFlow<Map<String, PhoneWatchTransferState>> = _transfers.asStateFlow()
+    private val _reachableWatchNodeIds = MutableStateFlow<Set<String>>(emptySet())
+    val reachableWatchNodeIds: StateFlow<Set<String>> = _reachableWatchNodeIds.asStateFlow()
+    private val _watchLibrarySyncedNodeIds = MutableStateFlow<Set<String>>(emptySet())
+    val watchLibrarySyncedNodeIds: StateFlow<Set<String>> = _watchLibrarySyncedNodeIds.asStateFlow()
+    private val _isWatchLibraryResolved = MutableStateFlow(true)
+    val isWatchLibraryResolved: StateFlow<Boolean> = _isWatchLibraryResolved.asStateFlow()
     private val watchSongIdsByNodeId = ConcurrentHashMap<String, Set<String>>()
     private val _watchSongIds = MutableStateFlow<Set<String>>(emptySet())
     val watchSongIds: StateFlow<Set<String>> = _watchSongIds.asStateFlow()
@@ -145,6 +151,24 @@ class PhoneWatchTransferStateStore @Inject constructor() {
     fun updateWatchSongIds(nodeId: String, songIds: Set<String>) {
         if (nodeId.isBlank()) return
         watchSongIdsByNodeId[nodeId] = songIds
+        if (nodeId in _reachableWatchNodeIds.value) {
+            _watchLibrarySyncedNodeIds.value = _watchLibrarySyncedNodeIds.value + nodeId
+        }
+        _watchSongIds.value = watchSongIdsByNodeId.values.flatten().toSet()
+        updateWatchLibraryResolution()
+    }
+
+    fun beginWatchLibraryRefresh(nodeIds: Set<String>) {
+        _reachableWatchNodeIds.value = nodeIds
+        _watchLibrarySyncedNodeIds.value = emptySet()
+        updateWatchLibraryResolution()
+    }
+
+    fun markSongPresentOnWatch(nodeId: String, songId: String) {
+        if (nodeId.isBlank() || songId.isBlank()) return
+        val existingSongIds = watchSongIdsByNodeId[nodeId].orEmpty()
+        if (songId in existingSongIds) return
+        watchSongIdsByNodeId[nodeId] = existingSongIds + songId
         _watchSongIds.value = watchSongIdsByNodeId.values.flatten().toSet()
     }
 
@@ -162,12 +186,30 @@ class PhoneWatchTransferStateStore @Inject constructor() {
     }
 
     fun retainReachableWatchNodes(nodeIds: Set<String>) {
+        _reachableWatchNodeIds.value = nodeIds
         watchSongIdsByNodeId.keys.toList().forEach { nodeId ->
             if (nodeId !in nodeIds) {
                 watchSongIdsByNodeId.remove(nodeId)
             }
         }
+        _watchLibrarySyncedNodeIds.value = _watchLibrarySyncedNodeIds.value.intersect(nodeIds)
         _watchSongIds.value = watchSongIdsByNodeId.values.flatten().toSet()
+        updateWatchLibraryResolution()
+    }
+
+    fun isSongSavedOnAllReachableWatches(songId: String): Boolean {
+        val reachableNodeIds = _reachableWatchNodeIds.value
+        if (reachableNodeIds.isEmpty() || songId.isBlank()) return false
+
+        return reachableNodeIds.all { nodeId ->
+            watchSongIdsByNodeId[nodeId]?.contains(songId) == true
+        }
+    }
+
+    private fun updateWatchLibraryResolution() {
+        val reachableNodeIds = _reachableWatchNodeIds.value
+        _isWatchLibraryResolved.value = reachableNodeIds.isEmpty() ||
+            reachableNodeIds.all { it in _watchLibrarySyncedNodeIds.value }
     }
 
     private fun scheduleTerminalCleanup(requestId: String) {

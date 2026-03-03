@@ -13,7 +13,7 @@ import com.theveloper.pixelplay.data.database.SongEntity
 import com.theveloper.pixelplay.data.database.toSong
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.network.netease.NeteaseApiService
-import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -34,7 +34,7 @@ class NeteaseRepository @Inject constructor(
     private val api: NeteaseApiService,
     private val dao: NeteaseDao,
     private val musicDao: MusicDao,
-    private val userPreferencesRepository: UserPreferencesRepository,
+    private val playlistPreferencesRepository: PlaylistPreferencesRepository,
     @ApplicationContext private val context: Context
 ) {
     data class BulkSyncResult(
@@ -723,7 +723,7 @@ class NeteaseRepository @Inject constructor(
             val appPlaylistId = getAppPlaylistIdForNetease(neteasePlaylistId)
             
             // Get all current app playlists
-            val allPlaylists = userPreferencesRepository.userPlaylistsFlow
+            val allPlaylists = playlistPreferencesRepository.userPlaylistsFlow
             val existingPlaylist = withContext(Dispatchers.IO) {
                 allPlaylists.map { playlists ->
                     playlists.find { it.id == appPlaylistId }
@@ -732,7 +732,7 @@ class NeteaseRepository @Inject constructor(
 
             if (existingPlaylist != null) {
                 // Update the existing playlist
-                userPreferencesRepository.updatePlaylist(
+                playlistPreferencesRepository.updatePlaylist(
                     existingPlaylist.copy(
                         name = playlistName,
                         songIds = unifiedSongIds,
@@ -743,7 +743,7 @@ class NeteaseRepository @Inject constructor(
                 Timber.d("Updated app playlist for Netease playlist $neteasePlaylistId: $playlistName")
             } else {
                 // Create a new playlist with custom ID to prevent duplicates
-                userPreferencesRepository.createPlaylist(
+                playlistPreferencesRepository.createPlaylist(
                     name = playlistName,
                     songIds = unifiedSongIds,
                     customId = appPlaylistId,  // Use NetEase prefix ID for matching on next sync
@@ -759,7 +759,7 @@ class NeteaseRepository @Inject constructor(
     private suspend fun deleteAppPlaylistForNeteasePlaylist(neteasePlaylistId: Long) {
         try {
             val appPlaylistId = getAppPlaylistIdForNetease(neteasePlaylistId)
-            userPreferencesRepository.deletePlaylist(appPlaylistId)
+            playlistPreferencesRepository.deletePlaylist(appPlaylistId)
             Timber.d("Deleted app playlist for Netease playlist $neteasePlaylistId")
         } catch (e: Exception) {
             Timber.w(e, "Failed to delete app playlist for Netease playlist $neteasePlaylistId")

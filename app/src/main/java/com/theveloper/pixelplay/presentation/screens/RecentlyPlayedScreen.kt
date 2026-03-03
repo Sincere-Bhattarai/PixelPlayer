@@ -114,13 +114,13 @@ fun RecentlyPlayedScreen(
         playerViewModel.stablePlayerState.map { it.isPlaying }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = false)
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
+    val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
 
     var selectedRange by rememberSaveable { mutableStateOf(StatsTimeRange.WEEK) }
     val lazyListState = rememberLazyListState()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
-    var selectedSongForInfo by remember { mutableStateOf<Song?>(null) }
     val bottomBarHeightDp = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     val recentlyPlayedSongs = remember(playbackHistory, allSongs, selectedRange) {
@@ -239,7 +239,7 @@ fun RecentlyPlayedScreen(
                                     )
                                 },
                                 onMoreOptionsClick = { song ->
-                                    selectedSongForInfo = song
+                                    playerViewModel.selectSongForInfo(song)
                                     showSongInfoBottomSheet = true
                                 }
                             )
@@ -260,7 +260,6 @@ fun RecentlyPlayedScreen(
                 onDismiss = {
                     showSongInfoBottomSheet = false
                     showPlaylistBottomSheet = false
-                    selectedSongForInfo = null
                 },
                 onPlaySong = {
                     if (queueSongs.isNotEmpty()) {

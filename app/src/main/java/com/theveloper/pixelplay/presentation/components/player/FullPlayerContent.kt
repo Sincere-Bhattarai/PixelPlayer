@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -589,26 +588,17 @@ fun FullPlayerContent(
                             }
                             val castCornersExpanded = 50.dp
                             val castCornersCompact = 6.dp
-                            val castTopStart by animateDpAsState(
-                                targetValue = if (showCastLabel) castCornersExpanded else castCornersExpanded,
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
-                            )
+                            val castTopStart = castCornersExpanded
                             val castTopEnd by animateDpAsState(
                                 targetValue = if (showCastLabel) castCornersExpanded else castCornersCompact,
                                 animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
                             )
-                            val castBottomStart by animateDpAsState(
-                                targetValue = if (showCastLabel) castCornersExpanded else castCornersExpanded,
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
-                            )
+                            val castBottomStart = castCornersExpanded
                             val castBottomEnd by animateDpAsState(
                                 targetValue = if (showCastLabel) castCornersExpanded else castCornersCompact,
                                 animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
                             )
-                            val castContainerColor by animateColorAsState(
-                                targetValue = playerOnAccentColor.copy(alpha = 0.7f),
-                                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
-                            )
+                            val castContainerColor = playerOnAccentColor.copy(alpha = 0.7f)
                             Box(
                                 modifier = Modifier
                                     .height(42.dp)

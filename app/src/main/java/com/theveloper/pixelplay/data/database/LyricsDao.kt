@@ -24,4 +24,7 @@ interface LyricsDao {
 
     @Query("SELECT * FROM lyrics")
     suspend fun getAll(): List<LyricsEntity>
+
+    @Query("SELECT songId FROM lyrics WHERE songId IN (:songIds) AND content != ''")
+    suspend fun getSongIdsWithLyrics(songIds: List<Long>): List<Long>
 }

@@ -11,6 +11,32 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.theveloper.pixelplay.utils.AudioMeta
 import kotlinx.coroutines.flow.Flow
 
+private const val SONG_DETAIL_PROJECTION = """
+    songs.id AS id,
+    songs.title AS title,
+    songs.artist_name AS artist_name,
+    songs.artist_id AS artist_id,
+    songs.album_artist AS album_artist,
+    songs.album_name AS album_name,
+    songs.album_id AS album_id,
+    songs.content_uri_string AS content_uri_string,
+    songs.album_art_uri_string AS album_art_uri_string,
+    songs.duration AS duration,
+    songs.genre AS genre,
+    songs.file_path AS file_path,
+    songs.parent_directory_path AS parent_directory_path,
+    songs.is_favorite AS is_favorite,
+    COALESCE(song_lyrics.content, songs.lyrics) AS lyrics,
+    songs.track_number AS track_number,
+    songs.year AS year,
+    songs.date_added AS date_added,
+    songs.mime_type AS mime_type,
+    songs.bitrate AS bitrate,
+    songs.sample_rate AS sample_rate,
+    songs.telegram_chat_id AS telegram_chat_id,
+    songs.telegram_file_id AS telegram_file_id
+"""
+
 @Dao
 interface MusicDao {
 
@@ -242,13 +268,32 @@ interface MusicDao {
     @Query("SELECT * FROM songs WHERE id IN (:songIds)")
     suspend fun getSongsByIdsListSimple(songIds: List<Long>): List<SongEntity>
 
-    @Query("SELECT * FROM songs WHERE id = :songId")
+    @Query(
+        "SELECT " + SONG_DETAIL_PROJECTION + """
+        FROM songs
+        LEFT JOIN lyrics AS song_lyrics ON song_lyrics.songId = songs.id
+        WHERE songs.id = :songId
+        """
+    )
     fun getSongById(songId: Long): Flow<SongEntity?>
 
-    @Query("SELECT * FROM songs WHERE id = :songId")
+    @Query(
+        "SELECT " + SONG_DETAIL_PROJECTION + """
+        FROM songs
+        LEFT JOIN lyrics AS song_lyrics ON song_lyrics.songId = songs.id
+        WHERE songs.id = :songId
+        """
+    )
     suspend fun getSongByIdOnce(songId: Long): SongEntity?
     
-    @Query("SELECT * FROM songs WHERE file_path = :path LIMIT 1")
+    @Query(
+        "SELECT " + SONG_DETAIL_PROJECTION + """
+        FROM songs
+        LEFT JOIN lyrics AS song_lyrics ON song_lyrics.songId = songs.id
+        WHERE songs.file_path = :path
+        LIMIT 1
+        """
+    )
     suspend fun getSongByPath(path: String): SongEntity?
 
     //@Query("SELECT * FROM songs WHERE id IN (:songIds)")
@@ -795,14 +840,13 @@ interface MusicDao {
         return newStatus
     }
 
-    @Query("UPDATE songs SET title = :title, artist_name = :artist, album_name = :album, genre = :genre, lyrics = :lyrics, track_number = :trackNumber WHERE id = :songId")
+    @Query("UPDATE songs SET title = :title, artist_name = :artist, album_name = :album, genre = :genre, track_number = :trackNumber WHERE id = :songId")
     suspend fun updateSongMetadata(
         songId: Long,
         title: String,
         artist: String,
         album: String,
         genre: String?,
-        lyrics: String?,
         trackNumber: Int
     )
 

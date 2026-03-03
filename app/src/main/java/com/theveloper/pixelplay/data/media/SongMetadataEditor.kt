@@ -120,7 +120,6 @@ class SongMetadataEditor(
             val trimmedLyrics = newLyrics.trim()
             val trimmedGenre = newGenre.trim()
             val normalizedGenre = trimmedGenre.takeIf { it.isNotBlank() }
-            val normalizedLyrics = trimmedLyrics.takeIf { it.isNotBlank() }
 
             // 1. FIRST: Get file path (Handle both MediaStore and Telegram/Negative IDs)
             val isTelegramSong = songId < 0
@@ -244,7 +243,6 @@ class SongMetadataEditor(
                     newArtist,
                     newAlbum,
                     normalizedGenre,
-                    normalizedLyrics,
                     newTrackNumber
                 )
 

@@ -281,6 +281,10 @@ class DualPlayerEngine @Inject constructor(
                 
                 val sink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(false) // Disable Float output to fix CCodec/Hardware errors on some devices
+                    .setAudioProcessorChain(
+                        // Custom downmix processor for 6 channel or 8 channel to 2 channel (stereo)
+                        DefaultAudioSink.DefaultAudioProcessorChain(SurroundDownmixProcessor())
+                    )
                     .build()
 
                 out.add(object : MediaCodecAudioRenderer(

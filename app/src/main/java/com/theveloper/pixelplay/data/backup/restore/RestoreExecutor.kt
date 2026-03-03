@@ -31,7 +31,7 @@ class RestoreExecutor @Inject constructor(
         plan: RestorePlan,
         onProgress: (BackupTransferProgressUpdate) -> Unit
     ): RestoreResult = withContext(Dispatchers.IO) {
-        val selectedModules = plan.selectedModules.toList()
+        val selectedModules = plan.selectedModules.toList().sortedBy { it.key }
         // 3 overhead steps: snapshot, validate, finalize
         val totalSteps = selectedModules.size * 3 + 3
         var step = 0
@@ -91,8 +91,10 @@ class RestoreExecutor @Inject constructor(
 
         // ---- PHASE 3: RESTORE ----
         val restoredModules = mutableSetOf<BackupSection>()
+        var currentSection: BackupSection? = null
         try {
             modulePayloads.forEach { (section, payload) ->
+                currentSection = section
                 reportProgress(
                     onProgress, ++step, totalSteps,
                     "Restoring ${section.label}",
@@ -121,11 +123,20 @@ class RestoreExecutor @Inject constructor(
                 }
             }
 
-            val failedSection = modulePayloads.keys.first { it !in restoredModules }
+            val failedReason = e.message ?: "Unknown error"
+            val failedSection = currentSection
+
+            if (rollbackSuccess) {
+                val failedLabel = failedSection?.label ?: "unknown module"
+                return@withContext RestoreResult.TotalFailure(
+                    "Restore failed at $failedLabel: $failedReason. All applied changes were rolled back."
+                )
+            }
+
             return@withContext RestoreResult.PartialFailure(
-                succeeded = emptySet(),
-                failed = mapOf(failedSection to (e.message ?: "Unknown error")),
-                rolledBack = rollbackSuccess
+                succeeded = restoredModules.toSet(),
+                failed = failedSection?.let { mapOf(it to failedReason) }.orEmpty(),
+                rolledBack = false
             )
         }
 

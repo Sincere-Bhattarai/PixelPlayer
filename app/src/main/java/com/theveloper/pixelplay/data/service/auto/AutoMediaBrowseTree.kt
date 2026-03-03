@@ -9,7 +9,7 @@ import com.theveloper.pixelplay.data.model.Album
 import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Playlist
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.utils.MediaItemBuilder
 import kotlinx.coroutines.flow.first
@@ -19,7 +19,7 @@ import javax.inject.Singleton
 @Singleton
 class AutoMediaBrowseTree @Inject constructor(
     private val musicRepository: MusicRepository,
-    private val userPreferencesRepository: UserPreferencesRepository,
+    private val playlistPreferencesRepository: PlaylistPreferencesRepository,
     private val engagementDao: EngagementDao
 ) {
 
@@ -100,7 +100,7 @@ class AutoMediaBrowseTree @Inject constructor(
             }
             mediaId.startsWith(PLAYLIST_PREFIX) -> {
                 val playlistId = mediaId.removePrefix(PLAYLIST_PREFIX)
-                val playlist = userPreferencesRepository.userPlaylistsFlow.first()
+                val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                     .find { it.id == playlistId } ?: return null
                 buildBrowsablePlaylistItem(playlist)
             }
@@ -151,7 +151,7 @@ class AutoMediaBrowseTree @Inject constructor(
     }
 
     private suspend fun getPlaylists(offset: Int, limit: Int): List<MediaItem> {
-        val playlists = userPreferencesRepository.userPlaylistsFlow.first()
+        val playlists = playlistPreferencesRepository.userPlaylistsFlow.first()
         return playlists
             .drop(offset)
             .take(limit)
@@ -212,7 +212,7 @@ class AutoMediaBrowseTree @Inject constructor(
             }
             CONTEXT_TYPE_PLAYLIST -> {
                 val playlistId = contextId ?: return emptyList()
-                val playlist = userPreferencesRepository.userPlaylistsFlow.first()
+                val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                     .find { it.id == playlistId } ?: return emptyList()
                 val songs = musicRepository.getSongsByIds(playlist.songIds).first()
                 val songsById = songs.associateBy { it.id }

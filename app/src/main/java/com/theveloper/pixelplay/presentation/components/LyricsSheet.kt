@@ -1342,16 +1342,6 @@ private fun LyricsTrackInfo(
 
     val albumShape = CircleShape
 
-    val infiniteTransition = rememberInfiniteTransition(label = "vinylRotation")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4000, easing = LinearEasing)
-        ),
-        label = "rotation"
-    )
-
     // Helper state to stop rotation when paused, but we want it to pause in place?
     // Using infiniteTransition.animateFloat will reset on recomposition if spec changes or stops.
     // For a realistic vinyl pause, we need a manual Animatable that loops.
