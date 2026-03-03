@@ -39,6 +39,7 @@ import javax.inject.Inject
 
 data class PlaylistUiState(
     val playlists: List<Playlist> = emptyList(),
+    val showTelegramCloudPlaylists: Boolean = true,
     val currentPlaylistSongs: List<Song> = emptyList(),
     val currentPlaylistDetails: Playlist? = null,
     val isLoading: Boolean = false,
@@ -102,6 +103,7 @@ class PlaylistViewModel @Inject constructor(
 
     init {
         loadPlaylistsAndInitialSortOption()
+        observeTelegramCloudPlaylistVisibility()
         loadMoreSongsForSelection(isInitialLoad = true)
         observePlaylistOrderModes()
     }
@@ -145,6 +147,14 @@ class PlaylistViewModel @Inject constructor(
                     // If the option from preferences is different, re-sort the current list
                     sortPlaylists(newSortOption)
                 }
+            }
+        }
+    }
+
+    private fun observeTelegramCloudPlaylistVisibility() {
+        viewModelScope.launch {
+            playlistPreferencesRepository.showTelegramCloudPlaylistsFlow.collect { show ->
+                _uiState.update { it.copy(showTelegramCloudPlaylists = show) }
             }
         }
     }
@@ -706,6 +716,15 @@ class PlaylistViewModel @Inject constructor(
 
         viewModelScope.launch {
             playlistPreferencesRepository.setPlaylistsSortOption(sortOption.storageKey)
+        }
+    }
+
+    fun setShowTelegramCloudPlaylists(show: Boolean) {
+        if (_uiState.value.showTelegramCloudPlaylists == show) return
+
+        _uiState.update { it.copy(showTelegramCloudPlaylists = show) }
+        viewModelScope.launch {
+            playlistPreferencesRepository.setShowTelegramCloudPlaylists(show)
         }
     }
 

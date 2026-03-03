@@ -37,6 +37,8 @@ class PlaylistPreferencesRepository @Inject constructor(
     val playlistSongOrderModesFlow: Flow<Map<String, String>> =
         userPreferencesRepository.playlistSongOrderModesFlow
     val playlistsSortOptionFlow: Flow<String> = userPreferencesRepository.playlistsSortOptionFlow
+    val showTelegramCloudPlaylistsFlow: Flow<Boolean> =
+        userPreferencesRepository.showTelegramCloudPlaylistsFlow
 
     suspend fun createPlaylist(
         name: String,
@@ -153,6 +155,9 @@ class PlaylistPreferencesRepository @Inject constructor(
 
     suspend fun setPlaylistsSortOption(optionKey: String) =
         userPreferencesRepository.setPlaylistsSortOption(optionKey)
+
+    suspend fun setShowTelegramCloudPlaylists(show: Boolean) =
+        userPreferencesRepository.setShowTelegramCloudPlaylists(show)
 
     suspend fun getPlaylistsOnce(): List<Playlist> {
         ensureMigratedIfNeeded()

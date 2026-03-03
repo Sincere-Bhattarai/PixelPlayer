@@ -486,6 +486,7 @@ fun LibraryArtistsTab(
 @Composable
 fun LibraryPlaylistsTab(
     playlistUiState: PlaylistUiState,
+    filteredPlaylists: List<com.theveloper.pixelplay.data.model.Playlist> = playlistUiState.playlists,
     navController: NavController,
     playerViewModel: PlayerViewModel,
     bottomBarHeight: Dp,
@@ -499,6 +500,7 @@ fun LibraryPlaylistsTab(
 ) {
     PlaylistContainer(
         playlistUiState = playlistUiState,
+        filteredPlaylists = filteredPlaylists,
         isRefreshing = isRefreshing,
         onRefresh = onRefresh,
         bottomBarHeight = bottomBarHeight,

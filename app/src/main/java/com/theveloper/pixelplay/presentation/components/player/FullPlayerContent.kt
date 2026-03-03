@@ -1081,6 +1081,7 @@ private fun FullPlayerProgressSection(
     )
 }
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun FullPlayerSongMetadataSection(
     song: Song,

@@ -108,6 +108,7 @@ constructor(
         val LIBRARY_TABS_ORDER = stringPreferencesKey("library_tabs_order")
         val IS_FOLDER_FILTER_ACTIVE = booleanPreferencesKey("is_folder_filter_active")
         val IS_FOLDERS_PLAYLIST_VIEW = booleanPreferencesKey("is_folders_playlist_view")
+        val SHOW_TELEGRAM_CLOUD_PLAYLISTS = booleanPreferencesKey("show_telegram_cloud_playlists")
         val FOLDERS_SOURCE = stringPreferencesKey("folders_source")
         val FOLDER_BACK_GESTURE_NAVIGATION = booleanPreferencesKey("folder_back_gesture_navigation")
         val USE_SMOOTH_CORNERS = booleanPreferencesKey("use_smooth_corners")
@@ -1291,6 +1292,11 @@ constructor(
             preferences[PreferencesKeys.IS_FOLDERS_PLAYLIST_VIEW] ?: false
         }
 
+    val showTelegramCloudPlaylistsFlow: Flow<Boolean> = dataStore.data
+        .map { preferences ->
+            preferences[PreferencesKeys.SHOW_TELEGRAM_CLOUD_PLAYLISTS] ?: true
+        }
+
     val foldersSourceFlow: Flow<FolderSource> = dataStore.data
         .map { preferences ->
             FolderSource.fromStorageKey(preferences[PreferencesKeys.FOLDERS_SOURCE])
@@ -1315,6 +1321,12 @@ constructor(
     suspend fun setFoldersPlaylistView(isPlaylistView: Boolean) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.IS_FOLDERS_PLAYLIST_VIEW] = isPlaylistView
+        }
+    }
+
+    suspend fun setShowTelegramCloudPlaylists(show: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SHOW_TELEGRAM_CLOUD_PLAYLISTS] = show
         }
     }
 

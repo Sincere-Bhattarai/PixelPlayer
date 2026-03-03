@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextAlign
@@ -79,7 +80,7 @@ fun QueueScreen(
             PaddingValues(
                 start = 0.dp,
                 end = 0.dp,
-                top = 6.dp,
+                top = 20.dp,
                 bottom = 20.dp,
             )
         },
@@ -227,6 +228,23 @@ fun QueueScreen(
                         item { Spacer(modifier = Modifier.height(24.dp)) }
                     }
                 }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(20.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colorStops = arrayOf(
+                                    0f to palette.screenBackgroundColor(),
+                                    0.28f to palette.screenBackgroundColor().copy(alpha = 0.96f),
+                                    0.68f to palette.screenBackgroundColor().copy(alpha = 0.42f),
+                                    1f to Color.Transparent,
+                                ),
+                            ),
+                        ),
+                )
 
                 AlwaysOnScalingPositionIndicator(
                     listState = columnState.state,

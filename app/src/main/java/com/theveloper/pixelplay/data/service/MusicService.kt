@@ -9,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.glance.appwidget.GlanceAppWidgetManager
@@ -177,6 +178,7 @@ class MusicService : MediaLibraryService() {
         private const val AUTO_CONTEXT_PLAYLIST = "playlist"
         private const val MAX_WIDGET_ARTWORK_BYTES = 2 * 1024 * 1024
         private const val DEFAULT_STREAM_BUFFER_SIZE = 8 * 1024
+        private const val WIDGET_ART_FAILURE_RETRY_MS = 30_000L
     }
 
     override fun onCreate() {
@@ -1421,6 +1423,7 @@ class MusicService : MediaLibraryService() {
     private var cachedWidgetArtUri: String? = null
     private var cachedWidgetArtBytes: ByteArray? = null
     private var cachedWidgetArtLoadFailureUri: String? = null
+    private var cachedWidgetArtLoadFailureAtMs: Long = 0L
 
     private suspend fun getAlbumArtForWidget(embeddedArt: ByteArray?, artUri: Uri?): Pair<ByteArray?, String?> = withContext(Dispatchers.IO) {
         val artUriString = artUri?.toString()
@@ -1428,6 +1431,7 @@ class MusicService : MediaLibraryService() {
             cachedWidgetArtUri = artUriString
             cachedWidgetArtBytes = bytes
             cachedWidgetArtLoadFailureUri = null
+            cachedWidgetArtLoadFailureAtMs = 0L
             return@withContext bytes to artUriString
         }
 
@@ -1440,7 +1444,10 @@ class MusicService : MediaLibraryService() {
             return@withContext cachedWidgetArtBytes to artUriString
         }
         if (artUriString == cachedWidgetArtLoadFailureUri) {
-            return@withContext null to artUriString
+            val failureAgeMs = SystemClock.elapsedRealtime() - cachedWidgetArtLoadFailureAtMs
+            if (failureAgeMs < WIDGET_ART_FAILURE_RETRY_MS) {
+                return@withContext null to artUriString
+            }
         }
 
         val loadedBytes = loadArtworkBytesForWidget(safeArtUri)
@@ -1448,10 +1455,12 @@ class MusicService : MediaLibraryService() {
             cachedWidgetArtUri = artUriString
             cachedWidgetArtBytes = loadedBytes
             cachedWidgetArtLoadFailureUri = null
+            cachedWidgetArtLoadFailureAtMs = 0L
             return@withContext loadedBytes to artUriString
         }
 
         cachedWidgetArtLoadFailureUri = artUriString
+        cachedWidgetArtLoadFailureAtMs = SystemClock.elapsedRealtime()
         return@withContext null to artUriString
     }
 
@@ -1469,23 +1478,32 @@ class MusicService : MediaLibraryService() {
         val scheme = uri.scheme?.lowercase()
         return when (scheme) {
             "content", "file", "android.resource" -> {
-                applicationContext.contentResolver.openInputStream(uri)?.use { input ->
-                    readBytesCapped(input, MAX_WIDGET_ARTWORK_BYTES)
+                runCatching {
+                    applicationContext.contentResolver.openInputStream(uri)?.use { input ->
+                        readBytesCapped(input, MAX_WIDGET_ARTWORK_BYTES)
+                    }
+                }.getOrElse { error ->
+                    Timber.tag(TAG).w(error, "Widget artwork read failed for local uri=%s", uri)
+                    null
                 }
             }
             "http", "https" -> {
-                val connection = (URL(uri.toString()).openConnection() as? HttpURLConnection)
-                    ?: return null
-                connection.connectTimeout = 4_000
-                connection.readTimeout = 6_000
-                connection.instanceFollowRedirects = true
-                connection.doInput = true
+                var connection: HttpURLConnection? = null
                 try {
+                    connection = (URL(uri.toString()).openConnection() as? HttpURLConnection)
+                        ?: return null
+                    connection.connectTimeout = 4_000
+                    connection.readTimeout = 6_000
+                    connection.instanceFollowRedirects = true
+                    connection.doInput = true
                     connection.inputStream.use { input ->
                         readBytesCapped(input, MAX_WIDGET_ARTWORK_BYTES)
                     }
+                } catch (error: Exception) {
+                    Timber.tag(TAG).w(error, "Widget artwork read failed for remote uri=%s", uri)
+                    null
                 } finally {
-                    connection.disconnect()
+                    connection?.disconnect()
                 }
             }
             else -> null

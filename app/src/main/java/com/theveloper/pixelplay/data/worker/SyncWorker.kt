@@ -115,11 +115,11 @@ constructor(
                         )
 
                     // --- MEDIA SCAN PHASE ---
-                    // For INCREMENTAL or FULL sync, trigger a media scan to detect new files
-                    // that may not have been indexed by MediaStore yet (e.g., files added via USB)
-                    if (syncMode != SyncMode.REBUILD) {
-                        triggerMediaScanForNewFiles(directoryResolver)
-                    }
+                    // Always run the pre-fetch media scan to detect files that are not yet indexed
+                    // by MediaStore (e.g., files added via USB/MTP).
+                    // Rebuild in particular must not skip this, otherwise it can clear DB data and
+                    // then fetch zero songs from a stale MediaStore index.
+                    triggerMediaScanForNewFiles(directoryResolver)
 
                     // --- DELETION PHASE ---
                     // Detect and remove deleted songs efficiently using ID comparison
@@ -194,13 +194,6 @@ constructor(
                     // --- PROCESSING PHASE ---
                     if (songsToInsert.isNotEmpty()) {
 
-                        // If rebuilding, clear everything first
-                        if (syncMode == SyncMode.REBUILD) {
-                            Timber.tag(TAG)
-                                .i("Rebuild mode: Clearing all music data before insert.")
-                            musicDao.clearAllMusicDataWithCrossRefs()
-                        }
-
                         val allExistingArtists =
                                 if (syncMode == SyncMode.REBUILD) {
                                     emptyList()
@@ -231,7 +224,9 @@ constructor(
                         // Use incrementalSyncMusicData for all modes except REBUILD
                         // Even for FULL sync, we can just upsert the values
                         if (syncMode == SyncMode.REBUILD) {
-                            musicDao.insertMusicDataWithCrossRefs(
+                            // Keep clear + insert in one transaction to avoid partial clears
+                            // if this worker gets cancelled/replaced mid-rebuild.
+                            musicDao.rebuildMusicDataWithCrossRefs(
                                     correctedSongs,
                                     albums,
                                     artists,
@@ -330,14 +325,22 @@ constructor(
                     } else {
                         Log.i(TAG, "No new or modified songs found.")
 
-                        // If it was a fresh install/rebuild and we found nothing, clear everything
-                        if ((syncMode == SyncMode.REBUILD || isFreshInstall) &&
-                                        songsToInsert.isEmpty()
-                        ) {
+                        // If it is a fresh install and we found nothing, keep DB empty.
+                        // For REBUILD on an existing library, do not clear existing data on
+                        // empty fetch to prevent accidental data loss from transient MediaStore issues.
+                        if (isFreshInstall && songsToInsert.isEmpty()) {
                             musicDao.clearAllMusicDataWithCrossRefs()
                             Log.w(
                                     TAG,
                                     "MediaStore fetch resulted in empty list. Local music data cleared."
+                            )
+                        } else if (syncMode == SyncMode.REBUILD && songsToInsert.isEmpty()) {
+                            Log.e(
+                                    TAG,
+                                    "Rebuild returned 0 songs. Preserving existing library to avoid destructive data loss."
+                            )
+                            return@withContext Result.failure(
+                                workDataOf(OUTPUT_TOTAL_SONGS to musicDao.getSongCount().first())
                             )
                         }
 

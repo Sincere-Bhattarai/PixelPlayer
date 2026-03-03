@@ -548,6 +548,7 @@ fun LibraryScreen(
     val playlistMultiSelectionState = playerViewModel.playlistSelectionStateHolder
     val selectedPlaylists by playlistMultiSelectionState.selectedPlaylists.collectAsStateWithLifecycle()
     val selectedPlaylistIds by playlistMultiSelectionState.selectedPlaylistIds.collectAsStateWithLifecycle()
+    val isPlaylistSelectionMode by playlistMultiSelectionState.isSelectionMode.collectAsStateWithLifecycle()
     var showPlaylistMultiSelectionSheet by remember { mutableStateOf(false) }
     var showMergePlaylistDialog by remember { mutableStateOf(false) }
     var pendingMergePlaylistIds by remember { mutableStateOf(emptyList<String>()) }
@@ -603,13 +604,50 @@ fun LibraryScreen(
         }
     }
 
-    BackHandler(
-        enabled =
-            currentTabId == LibraryTabId.FOLDERS &&
-                    canNavigateBackInFolders &&
-                    !isSortSheetVisible
-    ) {
-        playerViewModel.navigateBackFolder()
+    val hasSelectionInCurrentTab = when (currentTabId) {
+        LibraryTabId.PLAYLISTS -> isPlaylistSelectionMode
+        LibraryTabId.ALBUMS -> isAlbumSelectionMode
+        LibraryTabId.SONGS,
+        LibraryTabId.LIKED,
+        LibraryTabId.FOLDERS -> isSelectionMode
+        LibraryTabId.ARTISTS -> false
+    }
+    val canHandleFolderBack =
+        currentTabId == LibraryTabId.FOLDERS &&
+            canNavigateBackInFolders &&
+            !isSortSheetVisible
+
+    BackHandler(enabled = hasSelectionInCurrentTab || canHandleFolderBack) {
+        when {
+            hasSelectionInCurrentTab -> {
+                when (currentTabId) {
+                    LibraryTabId.PLAYLISTS -> {
+                        playlistMultiSelectionState.clearSelection()
+                        showPlaylistMultiSelectionSheet = false
+                        showMergePlaylistDialog = false
+                        pendingMergePlaylistIds = emptyList()
+                    }
+
+                    LibraryTabId.ALBUMS -> {
+                        selectedAlbums = emptyList()
+                        showAlbumMultiSelectionSheet = false
+                    }
+
+                    LibraryTabId.SONGS,
+                    LibraryTabId.LIKED,
+                    LibraryTabId.FOLDERS -> {
+                        multiSelectionState.clearSelection()
+                        showMultiSelectionSheet = false
+                    }
+
+                    LibraryTabId.ARTISTS -> Unit
+                }
+            }
+
+            canHandleFolderBack -> {
+                playerViewModel.navigateBackFolder()
+            }
+        }
     }
 
     // Feedback for Playlist Creation
@@ -943,10 +981,31 @@ fun LibraryScreen(
                         }
 
                         val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
+                        val visiblePlaylists = remember(
+                            playlistUiState.playlists,
+                            playlistUiState.showTelegramCloudPlaylists
+                        ) {
+                            if (playlistUiState.showTelegramCloudPlaylists) {
+                                playlistUiState.playlists
+                            } else {
+                                playlistUiState.playlists.filterNot { it.source == "TELEGRAM" }
+                            }
+                        }
                         val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
-                        val isPlaylistSelectionMode by playlistMultiSelectionState.isSelectionMode.collectAsStateWithLifecycle()
-
                         val favoritePagingItems = libraryViewModel.favoritesPagingFlow.collectAsLazyPagingItems()
+
+                        LaunchedEffect(
+                            playlistUiState.showTelegramCloudPlaylists,
+                            selectedPlaylists
+                        ) {
+                            if (playlistUiState.showTelegramCloudPlaylists) return@LaunchedEffect
+
+                            selectedPlaylists
+                                .filter { it.source == "TELEGRAM" }
+                                .forEach { playlist ->
+                                    playlistMultiSelectionState.removeFromSelection(playlist.id)
+                                }
+                        }
 
                         val currentSelectedSortOption: SortOption? = when (currentTabId) {
                             LibraryTabId.SONGS -> playerUiState.currentSongSortOption
@@ -1005,7 +1064,7 @@ fun LibraryScreen(
                                     SelectionActionRow(
                                         selectedCount = selectedPlaylists.size,
                                         onSelectAll = {
-                                            playerViewModel.playlistSelectionStateHolder.selectAll(playlistUiState.playlists)
+                                            playerViewModel.playlistSelectionStateHolder.selectAll(visiblePlaylists)
                                         },
                                         onDeselect = { playerViewModel.playlistSelectionStateHolder.clearSelection() },
                                         onOptionsClick = { showPlaylistMultiSelectionSheet = true }
@@ -1108,6 +1167,7 @@ fun LibraryScreen(
 
                             val isAlbumTab = currentTabId == LibraryTabId.ALBUMS
                             val isFoldersTab = currentTabId == LibraryTabId.FOLDERS
+                            val isPlaylistsTab = currentTabId == LibraryTabId.PLAYLISTS
 
                             LibrarySortBottomSheet(
                                 title = "Sort by",
@@ -1118,10 +1178,24 @@ fun LibraryScreen(
                                     onSortOptionChanged(option)
                                     playerViewModel.hideSortingSheet()
                                 },
-                                showViewToggle = isFoldersTab,
-                                viewToggleChecked = playerUiState.isFoldersPlaylistView,
+                                showViewToggle = isFoldersTab || isPlaylistsTab,
+                                viewSectionTitle = if (isPlaylistsTab) "Cloud" else "View",
+                                viewToggleLabel = if (isPlaylistsTab) {
+                                    "Telegram Cloud Channels"
+                                } else {
+                                    "Playlist View"
+                                },
+                                viewToggleChecked = if (isPlaylistsTab) {
+                                    playlistUiState.showTelegramCloudPlaylists
+                                } else {
+                                    playerUiState.isFoldersPlaylistView
+                                },
                                 onViewToggleChange = { isChecked ->
-                                    playerViewModel.setFoldersPlaylistView(isChecked)
+                                    if (isPlaylistsTab) {
+                                        playlistViewModel.setShowTelegramCloudPlaylists(isChecked)
+                                    } else {
+                                        playerViewModel.setFoldersPlaylistView(isChecked)
+                                    }
                                 },
                                 viewToggleContent = if (isAlbumTab) {
                                     {
@@ -1308,9 +1382,9 @@ fun LibraryScreen(
                                     }
 
                                     LibraryTabId.PLAYLISTS -> {
-                                        val currentPlaylistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
                                         LibraryPlaylistsTab(
-                                            playlistUiState = currentPlaylistUiState,
+                                            playlistUiState = playlistUiState,
+                                            filteredPlaylists = visiblePlaylists,
                                             navController = navController,
                                             playerViewModel = playerViewModel,
                                             bottomBarHeight = bottomBarHeightDp,
