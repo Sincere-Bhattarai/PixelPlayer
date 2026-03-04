@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
+import com.theveloper.pixelplay.data.model.PlaybackQueueSnapshot
 import com.theveloper.pixelplay.data.model.Playlist
 import com.theveloper.pixelplay.data.model.SortOption // Added import
 import com.theveloper.pixelplay.data.model.FolderSource
@@ -122,6 +123,7 @@ constructor(
         val PERSISTENT_SHUFFLE_ENABLED = booleanPreferencesKey("persistent_shuffle_enabled")
         val DISABLE_CAST_AUTOPLAY = booleanPreferencesKey("disable_cast_autoplay")
         val SHOW_QUEUE_HISTORY = booleanPreferencesKey("show_queue_history")
+        val PLAYBACK_QUEUE_SNAPSHOT = stringPreferencesKey("playback_queue_snapshot_v1")
         val FULL_PLAYER_SHOW_FILE_INFO = booleanPreferencesKey("full_player_show_file_info")
         val FULL_PLAYER_DELAY_ALL = booleanPreferencesKey("full_player_delay_all")
         val FULL_PLAYER_DELAY_ALBUM = booleanPreferencesKey("full_player_delay_album")
@@ -326,6 +328,27 @@ constructor(
 
     suspend fun setPersistentShuffleEnabled(enabled: Boolean) {
         dataStore.edit { preferences -> preferences[PreferencesKeys.PERSISTENT_SHUFFLE_ENABLED] = enabled }
+    }
+
+    val playbackQueueSnapshotFlow: Flow<PlaybackQueueSnapshot?> =
+            dataStore.data.map { preferences ->
+                preferences[PreferencesKeys.PLAYBACK_QUEUE_SNAPSHOT]?.let { raw ->
+                    runCatching { json.decodeFromString<PlaybackQueueSnapshot>(raw) }.getOrNull()
+                }
+            }
+
+    suspend fun getPlaybackQueueSnapshotOnce(): PlaybackQueueSnapshot? {
+        return playbackQueueSnapshotFlow.first()
+    }
+
+    suspend fun setPlaybackQueueSnapshot(snapshot: PlaybackQueueSnapshot?) {
+        dataStore.edit { preferences ->
+            if (snapshot == null || snapshot.items.isEmpty()) {
+                preferences.remove(PreferencesKeys.PLAYBACK_QUEUE_SNAPSHOT)
+            } else {
+                preferences[PreferencesKeys.PLAYBACK_QUEUE_SNAPSHOT] = json.encodeToString(snapshot)
+            }
+        }
     }
 
     // ===== Multi-Artist Settings =====
