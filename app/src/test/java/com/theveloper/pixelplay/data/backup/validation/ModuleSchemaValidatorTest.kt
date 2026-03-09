@@ -45,6 +45,13 @@ class ModuleSchemaValidatorTest {
     }
 
     @Test
+    fun `favorites with snake case song id pass validation`() {
+        val payload = """[{"song_id": "123", "added_at": 1700000000000}]"""
+        val result = validator.validate(BackupSection.FAVORITES, payload)
+        assertTrue(result.isValid())
+    }
+
+    @Test
     fun `artist images with non-https URL emits warning`() {
         val payload = """[{"artistName": "Test", "imageUrl": "http://insecure.com/img.jpg"}]"""
         val result = validator.validate(BackupSection.ARTIST_IMAGES, payload)

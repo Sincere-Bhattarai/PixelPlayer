@@ -175,9 +175,16 @@ class ModuleSchemaValidator @Inject constructor(
         array.forEachIndexed { i, element ->
             if (!element.isJsonObject) return@forEachIndexed
             val obj = element.asJsonObject
-            val songId = obj.get("songId")?.asLong ?: 0
-            if (songId <= 0) {
-                errors.add(ValidationError("INVALID_SONG_ID", "Favorites[$i]: invalid songId", module = "favorites", severity = Severity.WARNING))
+            val songId = readNumericField(obj, "songId", "song_id")
+            if (!songId.present || songId.value == null || songId.value <= 0L) {
+                errors.add(
+                    ValidationError(
+                        "INVALID_SONG_ID",
+                        "Favorites[$i]: invalid songId",
+                        module = "favorites",
+                        severity = Severity.WARNING
+                    )
+                )
             }
         }
     }

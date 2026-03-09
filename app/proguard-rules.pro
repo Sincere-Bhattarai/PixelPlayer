@@ -66,6 +66,12 @@
 -keep class com.theveloper.pixelplay.data.preferences.PreferenceBackupEntry { *; }
 -keep class com.theveloper.pixelplay.data.backup.model.** { *; }
 -keep class com.theveloper.pixelplay.data.backup.module.** { *; }
+# Backup payload entities are part of the persisted .pxpl contract.
+-keep class com.theveloper.pixelplay.data.database.FavoritesEntity { *; }
+-keep class com.theveloper.pixelplay.data.database.SongEngagementEntity { *; }
+-keep class com.theveloper.pixelplay.data.database.LyricsEntity { *; }
+-keep class com.theveloper.pixelplay.data.database.SearchHistoryEntity { *; }
+-keep class com.theveloper.pixelplay.data.database.TransitionRuleEntity { *; }
 
 # Netty channel classes are instantiated reflectively and require public no-arg constructors.
 # Without these, release builds can fail with:
