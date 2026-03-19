@@ -629,7 +629,6 @@ private fun rememberYourMixTitleStyle(): TextStyle {
                     variationSettings = FontVariation.Settings(
                         FontVariation.weight(636),
                         FontVariation.width(152f),
-                        //FontVariation.grade(40),
                         FontVariation.Setting("ROND", 50f),
                         FontVariation.Setting("XTRA", 520f),
                         FontVariation.Setting("YOPQ", 90f),

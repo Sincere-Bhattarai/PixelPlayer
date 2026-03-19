@@ -1,12 +1,8 @@
 package com.theveloper.pixelplay.presentation.components
 
-import com.theveloper.pixelplay.presentation.navigation.navigateSafely
+import com.theveloper.pixelplay.presentation.navigation.navigateToTopLevelSafely
 
 import android.os.SystemClock
-import androidx.compose.foundation.background
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -18,6 +14,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -50,6 +48,7 @@ private fun PlayerInternalNavigationItemsRow(
     val navBarInsetPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val latestCurrentRoute by rememberUpdatedState(currentRoute)
     val latestOnSearchIconDoubleTap by rememberUpdatedState(onSearchIconDoubleTap)
+    val latestNavigationEnabled by rememberUpdatedState(currentRoute != null)
 
     val rowModifier = if (navBarStyle == NavBarStyle.FULL_WIDTH) {
         modifier
@@ -68,7 +67,7 @@ private fun PlayerInternalNavigationItemsRow(
         val scope = rememberCoroutineScope()
         var lastSearchTapTimestamp by remember { mutableStateOf(0L) }
         navItems.forEach { item ->
-            val isSelected = currentRoute == item.screen.route
+            val isSelected = currentRoute != null && currentRoute == item.screen.route
             val selectedColor = MaterialTheme.colorScheme.primary
             val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
             val indicatorColorFromTheme = MaterialTheme.colorScheme.secondaryContainer
@@ -98,7 +97,12 @@ private fun PlayerInternalNavigationItemsRow(
                 { Text(item.label) }
             }
             val onClickLambda: () -> Unit = remember(item.screen.route, navController, scope) {
-                {
+                click@{
+                    if (!latestNavigationEnabled) {
+                        lastSearchTapTimestamp = 0L
+                        return@click
+                    }
+
                     val itemRoute = item.screen.route
                     val isSearchTab = itemRoute == Screen.Search.route
                     val isAlreadySelected = latestCurrentRoute == itemRoute
@@ -109,13 +113,9 @@ private fun PlayerInternalNavigationItemsRow(
                         lastSearchTapTimestamp = now
 
                         if (!isAlreadySelected) {
-                            // Direct navigation for bottom bar - no lifecycle check needed
-                            navController.navigate(itemRoute) {
-                                popUpTo(navController.graph.startDestinationId) { 
-                                    saveState = true 
-                                }
-                                launchSingleTop = true
-                                restoreState = true
+                            if (!navController.navigateToTopLevelSafely(itemRoute)) {
+                                lastSearchTapTimestamp = 0L
+                                return@click
                             }
                         }
 
@@ -132,14 +132,7 @@ private fun PlayerInternalNavigationItemsRow(
                         }
                     } else if (!isAlreadySelected) {
                         lastSearchTapTimestamp = 0L
-                        // Direct navigation for bottom bar - no lifecycle check needed
-                        navController.navigate(itemRoute) {
-                            popUpTo(navController.graph.startDestinationId) { 
-                                saveState = true 
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
+                        navController.navigateToTopLevelSafely(itemRoute)
                     } else {
                         lastSearchTapTimestamp = 0L
                     }
@@ -149,6 +142,7 @@ private fun PlayerInternalNavigationItemsRow(
                 modifier = Modifier.weight(1f),
                 selected = isSelected,
                 onClick = onClickLambda,
+                enabled = currentRoute != null,
                 icon = iconLambda,
                 selectedIcon = selectedIconLambda,
                 label = labelLambda,

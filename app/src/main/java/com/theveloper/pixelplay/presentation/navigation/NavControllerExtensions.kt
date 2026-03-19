@@ -5,7 +5,9 @@ import androidx.navigation.NavController
 import androidx.navigation.NavOptionsBuilder
 
 private fun NavController.isReadyForNavigation(): Boolean {
-    return currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED
+    return runCatching {
+        currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED
+    }.getOrDefault(false)
 }
 
 fun NavController.navigateSafely(route: String): Boolean {
@@ -24,6 +26,18 @@ fun NavController.navigateSafely(
     navigate(route) {
         launchSingleTop = true
         builder()
+    }
+    return true
+}
+
+fun NavController.navigateToTopLevelSafely(route: String): Boolean {
+    val startDestinationId = runCatching { graph.startDestinationId }.getOrNull() ?: return false
+    navigate(route) {
+        popUpTo(startDestinationId) {
+            saveState = true
+        }
+        launchSingleTop = true
+        restoreState = true
     }
     return true
 }
