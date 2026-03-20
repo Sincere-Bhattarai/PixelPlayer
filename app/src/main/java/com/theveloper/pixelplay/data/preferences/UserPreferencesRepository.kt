@@ -1386,7 +1386,7 @@ constructor(
 
     val useSmoothCornersFlow: Flow<Boolean> = dataStore.data
         .map { preferences ->
-            preferences[PreferencesKeys.USE_SMOOTH_CORNERS] ?: true
+            preferences[PreferencesKeys.USE_SMOOTH_CORNERS] ?: false
         }
 
     suspend fun setUseSmoothCorners(enabled: Boolean) {
