@@ -2,11 +2,14 @@ package com.theveloper.pixelplay.presentation.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.theveloper.pixelplay.data.database.MusicDao
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.service.wear.PhoneWatchTransferState
 import com.theveloper.pixelplay.data.service.wear.PhoneWatchTransferStateStore
 import com.theveloper.pixelplay.data.service.wear.WearPhoneTransferSender
 import com.theveloper.pixelplay.shared.WearTransferProgress
+import com.theveloper.pixelplay.utils.AudioMeta
+import com.theveloper.pixelplay.utils.AudioMetaUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import javax.inject.Inject
@@ -24,8 +27,10 @@ import kotlinx.coroutines.launch
 class SongInfoBottomSheetViewModel @Inject constructor(
     private val wearPhoneTransferSender: WearPhoneTransferSender,
     private val transferStateStore: PhoneWatchTransferStateStore,
+    private val musicDao: MusicDao,
 ) : ViewModel() {
 
+    private val _audioMeta = MutableStateFlow<AudioMeta?>(null)
     private val _isPixelPlayWatchAvailable = MutableStateFlow(false)
     val isPixelPlayWatchAvailable: StateFlow<Boolean> = _isPixelPlayWatchAvailable.asStateFlow()
     private val _isWatchAvailabilityResolved = MutableStateFlow(false)
@@ -59,6 +64,20 @@ class SongInfoBottomSheetViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000L),
         initialValue = false,
     )
+
+    val audioMeta: StateFlow<AudioMeta?> = _audioMeta.asStateFlow()
+
+    fun loadAudioMeta(song: Song) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val meta = AudioMetaUtils.getAudioMetadata(
+                musicDao = musicDao,
+                id = song.id.toLongOrNull() ?: -1L,
+                filePath = song.path,
+                deepScan = false
+            )
+            _audioMeta.value = meta
+        }
+    }
 
     fun refreshWatchAvailability() {
         if (_isRefreshingWatchAvailability.value) return

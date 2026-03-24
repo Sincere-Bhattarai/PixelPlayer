@@ -80,6 +80,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.TransformOrigin
 import com.theveloper.pixelplay.presentation.screens.TabAnimation
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
+import com.theveloper.pixelplay.utils.AudioMetaUtils
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -102,6 +103,7 @@ fun SongInfoBottomSheet(
 ) {
     val context = LocalContext.current
     var showEditSheet by remember { mutableStateOf(false) }
+    val audioMeta by songInfoViewModel.audioMeta.collectAsStateWithLifecycle()
     val isPixelPlayWatchAvailable by songInfoViewModel.isPixelPlayWatchAvailable.collectAsStateWithLifecycle()
     val isWatchAvailabilityResolved by songInfoViewModel.isWatchAvailabilityResolved.collectAsStateWithLifecycle()
     val isSendingToWatch by songInfoViewModel.isSendingToWatch.collectAsStateWithLifecycle()
@@ -142,7 +144,7 @@ fun SongInfoBottomSheet(
     ) {
         val failedTransfer = latestSongWatchTransfer?.takeIf {
             it.status == com.theveloper.pixelplay.shared.WearTransferProgress.STATUS_FAILED &&
-                !it.error.isNullOrBlank()
+                    !it.error.isNullOrBlank()
         } ?: return@LaunchedEffect
         val errorKey = "${failedTransfer.requestId}:${failedTransfer.error}"
         if (lastShownWatchTransferError == errorKey) return@LaunchedEffect
@@ -158,17 +160,17 @@ fun SongInfoBottomSheet(
         isWatchAvailabilityResolved,
     ) {
         currentSongTransfer == null &&
-            canSendToWatch &&
-            isWatchAvailabilityResolved &&
-            isPixelPlayWatchAvailable &&
-            !isSongSavedOnWatch
+                canSendToWatch &&
+                isWatchAvailabilityResolved &&
+                isPixelPlayWatchAvailable &&
+                !isSongSavedOnWatch
     }
     val shouldShowWatchTransferLoading = remember(
         canSendToWatch,
         isWatchAvailabilityResolved,
     ) {
         canSendToWatch &&
-            !isWatchAvailabilityResolved
+                !isWatchAvailabilityResolved
     }
 
     val evenCornerRadiusElems = 26.dp
@@ -237,6 +239,25 @@ fun SongInfoBottomSheet(
             smoothnessAsPercentTL = 60, cornerRadiusTL = favoriteButtonCornerRadius, smoothnessAsPercentBL = 60,
             cornerRadiusBL = favoriteButtonCornerRadius, smoothnessAsPercentTR = 60
         )
+    }
+
+    val audioMetaLabel = remember(audioMeta) {
+        val meta = audioMeta ?: return@remember null
+        val formatLabel = AudioMetaUtils.mimeTypeToFormat(meta.mimeType)
+            .takeIf { it != "-" }
+            ?.uppercase(java.util.Locale.getDefault())
+        val parts = buildList {
+            meta.sampleRate?.takeIf { it > 0 }
+                ?.let { add(String.format(java.util.Locale.US, "%.1f kHz", it / 1000.0)) }
+            meta.bitrate?.takeIf { it > 0 }
+                ?.let { add("${it / 1000} kbps") }
+            formatLabel?.let { add(it) }
+        }
+        parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
+    LaunchedEffect(song.id) {
+        songInfoViewModel.loadAudioMeta(song)
     }
 
     val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 2 })
@@ -608,7 +629,9 @@ fun SongInfoBottomSheet(
                                         if (!song.genre.isNullOrEmpty()) {
                                             item {
                                                 ListItem(
-                                                    modifier = Modifier.clip(shape = listItemShape),
+                                                    modifier = Modifier
+                                                        .clip(shape = listItemShape)
+                                                        .clickable(onClick = onNavigateToArtist),
                                                     headlineContent = { Text("Genre") },
                                                     supportingContent = { Text(song.genre) },
                                                     leadingContent = { Icon(Icons.Rounded.MusicNote, contentDescription = "Genre icon") }
@@ -636,6 +659,16 @@ fun SongInfoBottomSheet(
                                                 supportingContent = { Text(song.displayArtist) },
                                                 leadingContent = { Icon(Icons.Rounded.Person, contentDescription = "Artist icon") }
                                             )
+                                        }
+                                        if (!audioMetaLabel.isNullOrEmpty()) {
+                                            item {
+                                                ListItem(
+                                                    modifier = Modifier.clip(shape = listItemShape),
+                                                    headlineContent = { Text("Song info") },
+                                                    supportingContent = { Text(audioMetaLabel) },
+                                                    leadingContent = { Icon(Icons.Rounded.Info, contentDescription = "Audio format icon") }
+                                                )
+                                            }
                                         }
                                         item {
                                             ListItem(
