@@ -70,6 +70,9 @@ class AppShortcutManager @Inject constructor(
      * Removes the last playlist shortcut if it exists.
      */
     fun removeLastPlaylistShortcut() {
+        scope.launch {
+            userPreferencesRepository.clearLastPlaylist()
+        }
         ShortcutManagerCompat.removeDynamicShortcuts(context, listOf(SHORTCUT_ID_LAST_PLAYLIST))
     }
 }

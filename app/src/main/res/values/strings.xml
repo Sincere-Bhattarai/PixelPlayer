@@ -89,6 +89,7 @@
     <!-- Quick Settings Tiles -->
     <string name="tile_shuffle_all">Shuffle All</string>
     <string name="tile_last_playlist">Last Playlist</string>
+    <string name="tile_last_playlist_unavailable">No playlist available to open</string>
 
     <!-- Errors -->
     <string name="invalid_album_id">Invalid album ID</string>

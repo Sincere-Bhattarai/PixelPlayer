@@ -1632,7 +1632,9 @@ constructor(
     // --- Quick Settings: Last Playlist ---
 
     val lastPlaylistIdFlow: Flow<String?> =
-        dataStore.data.map { it[PreferencesKeys.LAST_PLAYLIST_ID] }
+        dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.LAST_PLAYLIST_ID]?.takeIf { it.isNotBlank() }
+        }
 
     val lastPlaylistNameFlow: Flow<String?> =
         dataStore.data.map { it[PreferencesKeys.LAST_PLAYLIST_NAME] }
@@ -1641,6 +1643,13 @@ constructor(
         dataStore.edit {
             it[PreferencesKeys.LAST_PLAYLIST_ID] = playlistId
             it[PreferencesKeys.LAST_PLAYLIST_NAME] = playlistName
+        }
+    }
+
+    suspend fun clearLastPlaylist() {
+        dataStore.edit {
+            it.remove(PreferencesKeys.LAST_PLAYLIST_ID)
+            it.remove(PreferencesKeys.LAST_PLAYLIST_NAME)
         }
     }
 }
