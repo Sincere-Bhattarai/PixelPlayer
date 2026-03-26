@@ -220,17 +220,47 @@ fun FullPlayerContent(
 
     val context = LocalContext.current
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
+        contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri: Uri? ->
             uri?.let {
                 try {
-                    context.contentResolver.openInputStream(it)?.use { inputStream ->
+                    val contentResolver = context.contentResolver
+                    
+                    // Check file size and name for safety
+                    var fileName = ""
+                    var fileSize = 0L
+                    contentResolver.query(it, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                        if (cursor.moveToFirst()) {
+                            fileName = if (nameIndex != -1) cursor.getString(nameIndex) else ""
+                            fileSize = if (sizeIndex != -1) cursor.getLong(sizeIndex) else 0L
+                        }
+                    }
+
+                    // Only allow max 1 MB file size (lyrics should be very small)
+                    if (fileSize > 1_000_000) {
+                        playerViewModel.sendToast("File too large. Please select a valid lyrics file.")
+                        return@let
+                    }
+
+                    // Only allow .lrc or .txt file
+                    val isLyricsFile = fileName.endsWith(".lrc", ignoreCase = true) ||
+                            fileName.endsWith(".txt", ignoreCase = true)
+                    
+                    if (!isLyricsFile) {
+                        playerViewModel.sendToast("Only support .lrc or .txt file.")
+                        return@let
+                    }
+
+                    contentResolver.openInputStream(it)?.use { inputStream ->
                         val lyricsContent = inputStream.bufferedReader().use { reader -> reader.readText() }
                         currentSong?.id?.toLong()?.let { songId ->
                             playerViewModel.importLyricsFromFile(songId, lyricsContent)
                         }
                     }
                     showFetchLyricsDialog = false
+                    showLyricsSheet = true
                 } catch (e: Exception) {
                     Timber.e(e, "Error reading imported lyrics file")
                     playerViewModel.sendToast("Error reading file.")
@@ -303,7 +333,7 @@ fun FullPlayerContent(
                     playerViewModel.resetLyricsSearchState()
                 },
                 onImport = {
-                    filePickerLauncher.launch("*/*")
+                    filePickerLauncher.launch(arrayOf("*/*"))
                 }
             )
         }
@@ -872,7 +902,7 @@ fun FullPlayerContent(
             onSearchLyrics = { forcePick -> playerViewModel.fetchLyricsForCurrentSong(forcePick) },
             onPickResult = { playerViewModel.acceptLyricsSearchResultForCurrentSong(it) },
             onManualSearch = { title, artist -> playerViewModel.searchLyricsManually(title, artist) },
-            onImportLyrics = { filePickerLauncher.launch("*/*") },
+            onImportLyrics = { filePickerLauncher.launch(arrayOf("*/*")) },
             onDismissLyricsSearch = { playerViewModel.resetLyricsSearchState() },
             lyricsSyncOffset = lyricsSyncOffset,
             onLyricsSyncOffsetChange = { currentSong?.id?.let { songId -> playerViewModel.setLyricsSyncOffset(songId, it) } },
